@@ -96,14 +96,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\include\SynopsisEngine.h" />
+    <ClInclude Include="..\include\yolo_define.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="third_party\yolo\YOLO-common.h" />
-    <ClInclude Include="third_party\yolo\YOLO11-OBB.hpp" />
-    <ClInclude Include="third_party\yolo\YOLO11-POSE.hpp" />
-    <ClInclude Include="third_party\yolo\YOLO11.hpp" />
-    <ClInclude Include="third_party\yolo\YOLO11CLASS.hpp" />
-    <ClInclude Include="third_party\yolo\YOLO11Seg.hpp" />
+    <ClInclude Include="third_party\yolo\YOLO11-OBB.h" />
+    <ClInclude Include="third_party\yolo\YOLO11-POSE.h" />
+    <ClInclude Include="third_party\yolo\YOLO11.h" />
+    <ClInclude Include="third_party\yolo\YOLO11CLASS.h" />
+    <ClInclude Include="third_party\yolo\YOLO11Seg.h" />
     <ClInclude Include="third_party\yolo_runner.h" />
   </ItemGroup>
   <ItemGroup>
@@ -113,9 +114,33 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="SynopsisEngine.cpp" />
-    <ClCompile Include="third_party\yolo_runner.cpp">
+    <ClCompile Include="third_party\yolo\YOLO-common.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11-OBB.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11-POSE.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11CLASS.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11Seg.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo_runner.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Use</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

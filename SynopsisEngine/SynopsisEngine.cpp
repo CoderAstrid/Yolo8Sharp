@@ -1,6 +1,15 @@
 #include "pch.h"
 #include "SynopsisEngine.h"
 
+#include "third_party\yolo_runner.h"
+#include <map>
+#include <memory>
+#include <mutex>
+
+static std::mutex g_mutex;
+static std::map<vsHandle, std::unique_ptr<YoloRunner>> g_instances;
+
+/*
 vsCode VSENGINE_API vsInitializeEngine(vsHandle* outHandle, const TCHAR* app_path)
 {
 	// Placeholder implementation
@@ -26,17 +35,36 @@ vsCode VSENGINE_API vsCloseVideo(vsHandle handle, int source_id)
 	// Placeholder implementation
 	return VS_SUCCESS;
 }
+*/
 
-vsCode VSENGINE_API vsInitYoloModel(vsHandle* outYolo, YoloTask task, const TCHAR* modelPath, const TCHAR* confPath)
+vsCode vsInitYoloModel(vsHandle* outYolo, const TCHAR* appPath, YoloTask task)
 {
-	// Placeholder implementation
-	*outYolo = reinterpret_cast<vsHandle>(new int(84)); // Dummy YOLO handle
+	if (!outYolo || !appPath)
+		return VS_ERROR_INVALID_HANDLE;
+
+	
+
+	auto runner = std::make_unique<YoloRunner>();
+
+	if (!runner->Init(task, appPath))
+		return VS_ERROR_INITIALIZATION_FAILED;
+
+	vsHandle handle = reinterpret_cast<vsHandle>(runner.get());
+
+	std::lock_guard<std::mutex> lock(g_mutex);
+	g_instances[handle] = std::move(runner);
+	*outYolo = handle;
+
 	return VS_SUCCESS;
 }
 
 vsCode VSENGINE_API vsReleaseYoloModel(vsHandle yoloHandle)
 {
-	// Placeholder implementation
-	delete reinterpret_cast<int*>(yoloHandle);
+	std::lock_guard<std::mutex> lock(g_mutex);
+	auto it = g_instances.find(yoloHandle);
+	if (it == g_instances.end())
+		return VS_ERROR_INVALID_HANDLE;
+
+	g_instances.erase(it);
 	return VS_SUCCESS;
 }

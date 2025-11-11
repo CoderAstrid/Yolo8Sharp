@@ -1,4 +1,4 @@
-
+﻿
 // SynopsisMfcDlg.cpp : implementation file
 //
 
@@ -80,13 +80,26 @@ CxImage MatToCxImage(const cv::Mat& mat)
 }
 // CSynopsisMfcDlg dialog
 
+CString GetAppPath()
+{
+	TCHAR szFullPath[MAX_PATH];
+	::GetModuleFileName(NULL, szFullPath, MAX_PATH);
 
+	CString strAppPath(szFullPath);
+	int nPos = strAppPath.ReverseFind(_T('\\'));
+
+	if (nPos != -1)
+		strAppPath = strAppPath.Left(nPos + 1);
+
+	return strAppPath; // includes trailing '\'
+}
 
 CSynopsisMfcDlg::CSynopsisMfcDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_SYNOPSISMFC_DIALOG, pParent)
 	, m_bInit(FALSE)
 	, m_iFileMode(1)
 	, m_iMode(0)
+	, m_YoloHandle(nullptr)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -101,6 +114,10 @@ void CSynopsisMfcDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BTN_PREVFRAME, m_btnPrevFrame);
 	DDX_Radio(pDX, IDC_RD_IMAGE, m_iFileMode);
 	DDX_Radio(pDX, IDC_RD_DETECT, m_iMode);
+	DDX_Control(pDX, IDC_SLIDER_SEEK, m_seekVideo);
+	DDX_Control(pDX, IDC_CB_PLAYMODE, m_cbPlayMode);
+	DDX_Control(pDX, IDC_LBL_TIMESTAMP, m_lblTimeStamp);
+	DDX_Control(pDX, IDC_LBL_INFO, m_lblInfo);
 }
 
 BEGIN_MESSAGE_MAP(CSynopsisMfcDlg, CDialogEx)
@@ -122,6 +139,10 @@ BEGIN_MESSAGE_MAP(CSynopsisMfcDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_RD_CLASSIFY, &CSynopsisMfcDlg::OnBnClickedRdClassify)
 	ON_BN_CLICKED(IDC_RD_POSE, &CSynopsisMfcDlg::OnBnClickedRdPose)
 	ON_BN_CLICKED(IDC_RD_OBB, &CSynopsisMfcDlg::OnBnClickedRdObb)
+	ON_WM_TIMER()
+	ON_WM_HSCROLL()
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
 
@@ -139,6 +160,17 @@ void CSynopsisMfcDlg::FrameRcvCallback(const cv::Mat& f, int64_t frameIdx, int64
 
 	auto img = MatToCxImage(frame_bgr_);
 	m_imageWnd.SetImage(img);
+	auto pos = m_videoPlayer.CurrentFrame();
+
+	if (GetSafeHwnd() && IsWindow(GetSafeHwnd())) {		
+		m_seekVideo.SetPos((int)pos);
+		CString timeStr = m_videoPlayer.GetFrameTimeStr();
+		CString totalStr = m_videoPlayer.GetTotalTimeStr();
+		CString timeInfo;
+		timeInfo.Format(_T("%s / %s"), timeStr.GetString(), totalStr.GetString());
+		m_lblTimeStamp.SetWindowText(timeInfo);
+	}
+	
 	// (Optionally store idx/total/fps for a status bar)	
 	//::PostMessage(hwnd, WM_FRAME_ARRIVED, 0, 0);
 }
@@ -264,6 +296,13 @@ void CSynopsisMfcDlg::OnBnClickedBtnBrowser()
 
 	if (!m_videoPlayer.Open(filename))
 		AfxMessageBox(_T("Cannot open video."));
+
+	auto totalCnt = m_videoPlayer.FrameCount();
+	m_seekVideo.SetRange(0, (totalCnt > 0) ? (int)(totalCnt - 1) : 0);
+	m_seekVideo.SetPos(0);
+	auto fps = m_videoPlayer.FPS();
+	//m_timerID = SetTimer(1, 1000 / fps, nullptr);
+	m_lblInfo.SetWindowText(m_videoPlayer.GetVideoSummary());
 }
 
 
@@ -280,26 +319,35 @@ void CSynopsisMfcDlg::OnBnClickedRdVideo()
 
 
 void CSynopsisMfcDlg::OnBnClickedBtnPlay()
-{
-	// TODO: Add your control notification handler code here
+{	
+	if(m_videoPlayer.GetState() == VideoPlayer::State::Playing) {
+		m_videoPlayer.Pause();
+		m_btnPlayPause.SetWindowText(_T("▶"));		
+	}
+	else {
+		m_videoPlayer.Play();
+		m_btnPlayPause.SetWindowText(_T("⏸"));
+	}
 }
 
 
 void CSynopsisMfcDlg::OnBnClickedBtnStop()
 {
-	// TODO: Add your control notification handler code here
+	if (m_videoPlayer.GetState() == VideoPlayer::State::Playing) {
+		m_videoPlayer.Stop();
+	}
 }
 
 
 void CSynopsisMfcDlg::OnBnClickedBtnNextframe()
 {
-	// TODO: Add your control notification handler code here
+	m_videoPlayer.NextFrame();
 }
 
 
 void CSynopsisMfcDlg::OnBnClickedBtnPrevframe()
 {
-	// TODO: Add your control notification handler code here
+	m_videoPlayer.PrevFrame();
 }
 
 void CSynopsisMfcDlg::InitControls()
@@ -308,6 +356,7 @@ void CSynopsisMfcDlg::InitControls()
 	GetDlgItem(IDC_PIC_FRAME)->GetWindowRect(&rcWnd);
 	ScreenToClient(&rcWnd);
 	m_imageWnd.CreateWnd(this, rcWnd, IDC_PIC_FRAME, 0);
+	vsInitYoloModel(&m_YoloHandle, GetAppPath());
 
 }
 
@@ -338,4 +387,58 @@ void CSynopsisMfcDlg::OnBnClickedRdPose()
 void CSynopsisMfcDlg::OnBnClickedRdObb()
 {
 	// TODO: Add your control notification handler code here
+}
+
+
+void CSynopsisMfcDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	CDialogEx::OnTimer(nIDEvent);
+}
+
+
+void CSynopsisMfcDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	if (pScrollBar->GetSafeHwnd() == m_seekVideo.GetSafeHwnd())
+	{
+		isSeeking_ = true;
+
+		/*if (nSBCode == TB_ENDTRACK || nSBCode == SB_THUMBPOSITION)
+		{
+			int frameIndex = m_seekVideo.GetPos();
+			m_videoPlayer.seekFrame(frameIndex);
+
+			cv::Mat frame;
+			if (m_videoPlayer.nextFrame(frame)) {
+				ShowFrame(frame);
+			}
+
+			isSeeking_ = false;
+		}*/
+	}
+
+	CDialogEx::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+
+void CSynopsisMfcDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CDialogEx::OnSize(nType, cx, cy);
+
+	if (m_bInit) {
+		CRect rc;
+		GetDlgItem(IDC_PIC_FRAME)->GetWindowRect(&rc);
+		ScreenToClient(&rc);
+		m_imageWnd.MoveWindow(rc);
+	}
+}
+
+
+void CSynopsisMfcDlg::OnDestroy()
+{
+	CDialogEx::OnDestroy();
+
+	if (m_YoloHandle) {
+		vsReleaseYoloModel(m_YoloHandle);
+		m_YoloHandle = nullptr;
+	}
 }

@@ -1,21 +1,31 @@
 #pragma once
+#include <onnxruntime_cxx_api.h>
+#include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
-#include <opencv2/opencv.hpp>
+#include <tchar.h>
+#include "yolo_define.h"
+#include "yolo/YOLO11.h"
+#include "yolo/YOLO11CLASS.h"
+#include "yolo/YOLO11-POSE.h"
+#include "yolo/YOLO11-OBB.h"
+#include "yolo/YOLO11Seg.h"
 
-enum class YoloTask { Detect = 0, Segment = 1, Pose = 2 };
 
+/*
 struct YoloDet {
     cv::Rect2f box;
     float conf{};
     int cls{};
 };
+
 struct YoloPose {
     cv::Rect2f box;
     std::vector<cv::Point2f> kps; // with size N, if pose
     float conf{};
     int cls{};
 };
+
 struct YoloSeg {
     cv::Rect2f box;
     cv::Mat mask; // 8U same size as frame or ROI, depending on lib
@@ -24,7 +34,7 @@ struct YoloSeg {
 };
 
 struct YoloParams {
-    YoloTask task = YoloTask::Detect;
+    YoloTask task = YoloTask::YT_DETECT;
     int imgsz = 640;
     float conf = 0.25f;
     float iou = 0.50f;
@@ -32,29 +42,28 @@ struct YoloParams {
     std::string onnx;
     std::string labels; // path to txt; can be empty
 };
+*/
 
 class YoloRunner {
 public:
-    bool Init(const YoloParams& p, std::string* err = nullptr);
-    bool Ready() const { return ready_; }
-    void Close();
+    YoloRunner() = default;
+    ~YoloRunner();
 
-    // Run on a BGR frame; only fill the vector that matches task
-    bool Run(const cv::Mat& bgr,
-        std::vector<YoloDet>* outDet,
-        std::vector<YoloSeg>* outSeg,
-        std::vector<YoloPose>* outPose,
-        double* ms_pre = nullptr, double* ms_infer = nullptr, double* ms_post = nullptr);
-
-    const std::vector<std::string>& Classes() const { return classes_; }
-
+    bool Init(YoloTask task, const TCHAR* appPath);
+    void Release();
 private:
-    bool ready_ = false;
-    YoloParams P_;
-    std::vector<std::string> classes_;
+    Ort::Env env_;
+    Ort::Session session_{ nullptr };
+    Ort::SessionOptions sessionOptions_;
+    Ort::AllocatorWithDefaultOptions allocator_;
+    bool isInitialized_ = false;
 
-    // Pointers for exactly one active task
-    struct DetectAPI; std::unique_ptr<DetectAPI> detect_;
-    struct SegAPI;    std::unique_ptr<SegAPI>    seg_;
-    struct PoseAPI;   std::unique_ptr<PoseAPI>   pose_;
+    std::vector<std::string> inputNames_;
+    std::vector<std::string> outputNames_;
+
+    std::unique_ptr<YOLO11Detector> detector_;
+    std::unique_ptr<YOLO11Classifier> classifier_;
+    std::unique_ptr<YOLO11OBBDetector> obb_;
+    std::unique_ptr<YOLO11POSEDetector> pose_;
+    std::unique_ptr<YOLOv11SegDetector> seg_;
 };

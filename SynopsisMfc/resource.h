@@ -23,6 +23,11 @@
 #define IDC_RD_CLASSIFY                 1012
 #define IDC_RD_POSE                     1013
 #define IDC_RD_OBB                      1014
+#define IDC_CB_PLAYMODE                 1015
+#define IDC_EDIT_STEP                   1016
+#define IDC_SPIN_STEP                   1017
+#define IDC_LBL_TIMESTAMP               1018
+#define IDC_LBL_INFO                    1019
 
 // Next default values for new objects
 // 
@@ -30,7 +35,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        130
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1014
+#define _APS_NEXT_CONTROL_VALUE         1020
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

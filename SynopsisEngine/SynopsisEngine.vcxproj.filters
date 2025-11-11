@@ -27,26 +27,29 @@
     <ClInclude Include="..\include\SynopsisEngine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\yolo\YOLO11Seg.hpp">
+    <ClInclude Include="third_party\yolo\YOLO11Seg.h">
       <Filter>YOLO</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\yolo\YOLO11.hpp">
+    <ClInclude Include="third_party\yolo\YOLO11.h">
       <Filter>YOLO</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\yolo\YOLO11CLASS.hpp">
+    <ClInclude Include="third_party\yolo\YOLO11CLASS.h">
       <Filter>YOLO</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\yolo\YOLO11-POSE.hpp">
+    <ClInclude Include="third_party\yolo\YOLO11-POSE.h">
       <Filter>YOLO</Filter>
     </ClInclude>
     <ClInclude Include="third_party\yolo_runner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\yolo\YOLO11-OBB.hpp">
+    <ClInclude Include="third_party\yolo\YOLO11-OBB.h">
       <Filter>YOLO</Filter>
     </ClInclude>
     <ClInclude Include="third_party\yolo\YOLO-common.h">
       <Filter>YOLO</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\yolo_define.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -61,6 +64,24 @@
     </ClCompile>
     <ClCompile Include="third_party\yolo_runner.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11.cpp">
+      <Filter>YOLO</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11CLASS.cpp">
+      <Filter>YOLO</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11-OBB.cpp">
+      <Filter>YOLO</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11-POSE.cpp">
+      <Filter>YOLO</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO11Seg.cpp">
+      <Filter>YOLO</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\yolo\YOLO-common.cpp">
+      <Filter>YOLO</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

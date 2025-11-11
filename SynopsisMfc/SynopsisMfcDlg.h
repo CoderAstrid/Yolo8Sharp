@@ -2,10 +2,11 @@
 // SynopsisMfcDlg.h : header file
 //
 #pragma once
-#include "VideoPlayer.h"
-#include "PicWndDemo.h"
 #include <mutex>
 #include <opencv2/opencv.hpp>
+#include "VideoPlayer.h"
+#include "PicWndDemo.h"
+#include "SynopsisEngine.h"
 
 const UINT WM_FRAME_ARRIVED = ::RegisterWindowMessage(_T("WM_FRAME_ARRIVED"));
 
@@ -30,6 +31,7 @@ private:
 	VideoPlayer m_videoPlayer;
 	CPicEditWnd m_imageWnd;
 	BOOL		m_bInit;
+	vsHandle    m_YoloHandle;
 
 	std::mutex mtx_;
 	cv::Mat frame_bgr_; // last frame
@@ -69,4 +71,17 @@ public:
 	afx_msg void OnBnClickedRdClassify();
 	afx_msg void OnBnClickedRdPose();
 	afx_msg void OnBnClickedRdObb();
+	CSliderCtrl m_seekVideo;
+
+	bool isSeeking_ = false;  // prevent loop updates during drag
+
+	UINT_PTR m_timerID = 0;
+
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	CComboBox m_cbPlayMode;
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	CStatic m_lblTimeStamp;
+	CStatic m_lblInfo;
+	afx_msg void OnDestroy();
 };

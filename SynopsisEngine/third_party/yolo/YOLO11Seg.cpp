@@ -1,322 +1,10 @@
-#pragma once
-
-// ====================================================
-// Single YOLOv11 Segmentation and Detection Header File
-// ====================================================
-//
-// This header defines the YOLOv11SegDetector class for performing object detection 
-// and segmentation using the YOLOv11 model. It includes necessary libraries, 
-// utility structures, and helper functions to facilitate model inference 
-// and result post-processing.
-//
-// Author: Abdalrahman M. Amer, www.linkedin.com/in/abdalrahman-m-amer
-// Date: 25.01.2025
-//
-// ====================================================
+#include "YOLO11Seg.h"
 
 
-#include <onnxruntime_cxx_api.h>
-#include <opencv2/opencv.hpp>
-
-#include <algorithm>
-#include <chrono>
-#include <fstream>
-#include <iostream>
-#include <memory>
-#include <numeric>
-#include <random>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-// ============================================================================
-// Debug/Timer Utilities (Optional)
-// ============================================================================
-#ifdef DEBUG
-    #define DEBUG_PRINT(msg) std::cout << "[DEBUG] " << msg << std::endl
-#else
-    #define DEBUG_PRINT(msg) /* no-op */
-#endif
-
-// Simple scoped timer (optional)
-/*
-class ScopedTimer {
-public:
-    explicit ScopedTimer(const std::string &name_)
-        : name(name_), start(std::chrono::high_resolution_clock::now()) {}
-    ~ScopedTimer() {
-#ifdef DEBUG
-        auto end = std::chrono::high_resolution_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(end - start).count();
-        std::cout << "[TIMER] " << name << ": " << ms << " ms" << std::endl;
-#endif
-    }
-private:
-    std::string name;
-    std::chrono::time_point<std::chrono::high_resolution_clock> start;
-};
-*/
-// ============================================================================
-// Constants / Thresholds
-// ============================================================================
-static const float CONFIDENCE_THRESHOLD_SEG = 0.40f; // Filter boxes below this confidence
-static const float IOU_THRESHOLD_SEG        = 0.45f; // NMS IoU threshold
-static const float MASK_THRESHOLD_SEG       = 0.40f; // Slightly lower to capture partial objects
-
-
-
-// ============================================================================
-// Utility Namespace
-// ============================================================================
-namespace utils {
-
-    
-
-    inline std::vector<std::string> getClassNamesSeg(const std::string &path) {
-        std::vector<std::string> classNames;
-        std::ifstream f(path);
-        if (!f) {
-            std::cerr << "[ERROR] Could not open class names file: " << path << std::endl;
-            return classNames;
-        }
-        std::string line;
-        while (std::getline(f, line)) {
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            classNames.push_back(line);
-        }
-        DEBUG_PRINT("Loaded " << classNames.size() << " class names from " << path);
-        return classNames;
-    }
-
-	/*
-    inline size_t vectorProduct(const std::vector<int64_t> &shape) {
-        return std::accumulate(shape.begin(), shape.end(), 1ull, std::multiplies<size_t>());
-    }
-	*/
-
-    inline void letterBoxSeg(const cv::Mat &image, cv::Mat &outImage,
-                          const cv::Size &newShape,
-                          const cv::Scalar &color     = cv::Scalar(114, 114, 114),
-                          bool auto_       = true,
-                          bool scaleFill   = false,
-                          bool scaleUp     = true,
-                          int stride       = 32) {
-        float r = std::min((float)newShape.height / (float)image.rows,
-                           (float)newShape.width  / (float)image.cols);
-        if (!scaleUp) {
-            r = std::min(r, 1.0f);
-        }
-
-        int newW = static_cast<int>(std::round(image.cols * r));
-        int newH = static_cast<int>(std::round(image.rows * r));
-
-        int dw = newShape.width  - newW;
-        int dh = newShape.height - newH;
-
-        if (auto_) {
-            dw = dw % stride;
-            dh = dh % stride;
-        }
-        else if (scaleFill) {
-            newW = newShape.width;
-            newH = newShape.height;
-            dw = 0;
-            dh = 0;
-        }
-
-        cv::Mat resized;
-        cv::resize(image, resized, cv::Size(newW, newH), 0, 0, cv::INTER_LINEAR);
-
-        int top = dh / 2;
-        int bottom = dh - top;
-        int left = dw / 2;
-        int right = dw - left;
-        cv::copyMakeBorder(resized, outImage, top, bottom, left, right, cv::BORDER_CONSTANT, color);
-    }
-
-    inline BoundingBox scaleCoordsSeg(const cv::Size &letterboxShape,
-                                   const BoundingBox &coords,
-                                   const cv::Size &originalShape,
-                                   bool p_Clip = true) {
-        float gain = std::min((float)letterboxShape.height / (float)originalShape.height,
-                              (float)letterboxShape.width  / (float)originalShape.width);
-
-        int padW = static_cast<int>(std::round(((float)letterboxShape.width  - (float)originalShape.width  * gain) / 2.f));
-        int padH = static_cast<int>(std::round(((float)letterboxShape.height - (float)originalShape.height * gain) / 2.f));
-
-        BoundingBox ret;
-        ret.x      = static_cast<int>(std::round(((float)coords.x      - (float)padW) / gain));
-        ret.y      = static_cast<int>(std::round(((float)coords.y      - (float)padH) / gain));
-        ret.width  = static_cast<int>(std::round((float)coords.width   / gain));
-        ret.height = static_cast<int>(std::round((float)coords.height  / gain));
-
-        if (p_Clip) {
-            ret.x = clamp(ret.x, 0, originalShape.width);
-            ret.y = clamp(ret.y, 0, originalShape.height);
-            ret.width  = clamp(ret.width,  0, originalShape.width  - ret.x);
-            ret.height = clamp(ret.height, 0, originalShape.height - ret.y);
-        }
-
-        return ret;
-    }
-
-    inline std::vector<cv::Scalar> generateColorsSeg(const std::vector<std::string> &classNames, int seed = 42) {
-        static std::unordered_map<size_t, std::vector<cv::Scalar>> cache;
-        size_t key = 0;
-        for (const auto &name : classNames) {
-            size_t h = std::hash<std::string>{}(name);
-            key ^= (h + 0x9e3779b9 + (key << 6) + (key >> 2));
-        }
-        auto it = cache.find(key);
-        if (it != cache.end()) {
-            return it->second;
-        }
-        std::mt19937 rng(seed);
-        std::uniform_int_distribution<int> dist(0, 255);
-        std::vector<cv::Scalar> colors;
-        colors.reserve(classNames.size());
-        for (size_t i = 0; i < classNames.size(); ++i) {
-            colors.emplace_back(cv::Scalar(dist(rng), dist(rng), dist(rng)));
-        }
-        cache[key] = colors;
-        return colors;
-    }
-
-
-
-    cv::Mat sigmoid(const cv::Mat& src) {
-        cv::Mat dst;
-        cv::exp(-src, dst);
-        dst = 1.0 / (1.0 + dst);
-        return dst;
-    }
-        inline void NMSBoxesSeg(const std::vector<BoundingBox> &boxes,
-                         const std::vector<float> &scores,
-                         float scoreThreshold,
-                         float nmsThreshold,
-                         std::vector<int> &indices) {
-        indices.clear();
-        if (boxes.empty()) {
-            return;
-        }
-
-        std::vector<int> order;
-        order.reserve(boxes.size());
-        for (size_t i = 0; i < boxes.size(); ++i) {
-            if (scores[i] >= scoreThreshold) {
-                order.push_back((int)i);
-            }
-        }
-        if (order.empty()) return;
-
-        std::sort(order.begin(), order.end(),
-                  [&scores](int a, int b) {
-                      return scores[a] > scores[b];
-                  });
-
-        std::vector<float> areas(boxes.size());
-        for (size_t i = 0; i < boxes.size(); ++i) {
-            areas[i] = (float)(boxes[i].width * boxes[i].height);
-        }
-
-        std::vector<bool> suppressed(boxes.size(), false);
-        for (size_t i = 0; i < order.size(); ++i) {
-            int idx = order[i];
-            if (suppressed[idx]) continue;
-
-            indices.push_back(idx);
-
-            for (size_t j = i + 1; j < order.size(); ++j) {
-                int idx2 = order[j];
-                if (suppressed[idx2]) continue;
-
-                const BoundingBox &a = boxes[idx];
-                const BoundingBox &b = boxes[idx2];
-                int interX1 = std::max(a.x, b.x);
-                int interY1 = std::max(a.y, b.y);
-                int interX2 = std::min(a.x + a.width,  b.x + b.width);
-                int interY2 = std::min(a.y + a.height, b.y + b.height);
-
-                int w = interX2 - interX1;
-                int h = interY2 - interY1;
-                if (w > 0 && h > 0) {
-                    float interArea = (float)(w * h);
-                    float unionArea = areas[idx] + areas[idx2] - interArea;
-                    float iou = (unionArea > 0.f)? (interArea / unionArea) : 0.f;
-                    if (iou > nmsThreshold) {
-                        suppressed[idx2] = true;
-                    }
-                }
-            }
-        }
-    }
-
-} // namespace utils
-
-// ============================================================================
-// YOLOv11SegDetector Class
-// ============================================================================
-class YOLOv11SegDetector {
-public:
-    YOLOv11SegDetector(const std::string &modelPath,
-                      const std::string &labelsPath,
-                      bool useGPU = false);
-
-    // Main API
-    std::vector<Segmentation> segment(const cv::Mat &image,
-                                      float confThreshold = CONFIDENCE_THRESHOLD_SEG,
-                                      float iouThreshold  = IOU_THRESHOLD_SEG);
-
-    // Draw results
-    void drawSegmentationsAndBoxes(cv::Mat &image,
-                           const std::vector<Segmentation> &results,
-                           float maskAlpha = 0.5f) const;
-
-    void drawSegmentations(cv::Mat &image,
-                           const std::vector<Segmentation> &results,
-                           float maskAlpha = 0.5f) const;
-    // Accessors
-    const std::vector<std::string> &getClassNames()  const { return classNames;  }
-    const std::vector<cv::Scalar>  &getClassColors() const { return classColors; }
-
-private:
-    Ort::Env           env;
-    Ort::SessionOptions sessionOptions;
-    Ort::Session       session{nullptr};
-
-    bool     isDynamicInputShape{false};
-    cv::Size inputImageShape; 
-
-    std::vector<Ort::AllocatedStringPtr> inputNameAllocs;
-    std::vector<const char*>             inputNames;
-    std::vector<Ort::AllocatedStringPtr> outputNameAllocs;
-    std::vector<const char*>             outputNames;
-
-    size_t numInputNodes  = 0;
-    size_t numOutputNodes = 0;
-
-    std::vector<std::string> classNames;
-    std::vector<cv::Scalar>  classColors;
-
-    // Helpers
-    cv::Mat preprocess(const cv::Mat &image,
-                       float *&blobPtr,
-                       std::vector<int64_t> &inputTensorShape);
-
-    std::vector<Segmentation> postprocess(const cv::Size &origSize,
-                                          const cv::Size &letterboxSize,
-                                          const std::vector<Ort::Value> &outputs,
-                                          float confThreshold,
-                                          float iouThreshold);
-};
-
-inline YOLOv11SegDetector::YOLOv11SegDetector(const std::string &modelPath,
-                                            const std::string &labelsPath,
-                                            bool useGPU)
-    : env(ORT_LOGGING_LEVEL_WARNING, "YOLOv11Seg") 
+inline YOLOv11SegDetector::YOLOv11SegDetector(const String& modelPath,
+    const String& labelsPath,
+    bool useGPU)
+    : env(ORT_LOGGING_LEVEL_WARNING, "YOLOv11Seg")
 {
     ScopedTimer timer("YOLOv11SegDetector Constructor");
 
@@ -328,18 +16,14 @@ inline YOLOv11SegDetector::YOLOv11SegDetector(const std::string &modelPath,
         OrtCUDAProviderOptions cudaOptions;
         sessionOptions.AppendExecutionProvider_CUDA(cudaOptions);
         std::cout << "[INFO] Using GPU (CUDA) for YOLOv11 Seg inference.\n";
-    } else {
+    }
+    else {
         std::cout << "[INFO] Using CPU for YOLOv11 Seg inference.\n";
     }
 
-#ifdef _WIN32
-    std::wstring w_modelPath(modelPath.begin(), modelPath.end());
-    session = Ort::Session(env, w_modelPath.c_str(), sessionOptions);
-#else
     session = Ort::Session(env, modelPath.c_str(), sessionOptions);
-#endif
 
-    numInputNodes  = session.GetInputCount();
+    numInputNodes = session.GetInputCount();
     numOutputNodes = session.GetOutputCount();
 
     Ort::AllocatorWithDefaultOptions allocator;
@@ -351,16 +35,18 @@ inline YOLOv11SegDetector::YOLOv11SegDetector(const std::string &modelPath,
         inputNames.push_back(inputNameAllocs.back().get());
 
         auto inTypeInfo = session.GetInputTypeInfo(0);
-        auto inShape    = inTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
+        auto inShape = inTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
 
         if (inShape.size() == 4) {
             if (inShape[2] == -1 || inShape[3] == -1) {
                 isDynamicInputShape = true;
                 inputImageShape = cv::Size(640, 640); // Fallback if dynamic
-            } else {
+            }
+            else {
                 inputImageShape = cv::Size(static_cast<int>(inShape[3]), static_cast<int>(inShape[2]));
             }
-        } else {
+        }
+        else {
             throw std::runtime_error("Model input is not 4D! Expect [N, C, H, W].");
         }
     }
@@ -376,32 +62,34 @@ inline YOLOv11SegDetector::YOLOv11SegDetector(const std::string &modelPath,
         outputNames.push_back(outputNameAllocs.back().get());
     }
 
-    classNames  = utils::getClassNamesSeg(labelsPath);
+    classNames = utils::getClassNames(labelsPath);
     classColors = utils::generateColorsSeg(classNames);
 
-    std::cout << "[INFO] YOLOv11Seg loaded: " << modelPath << std::endl
-              << "      Input shape: " << inputImageShape 
+    /*
+    std::wcout << L"[INFO] YOLOv11Seg loaded: " << modelPath << std::endl
+              << L"      Input shape: " << inputImageShape
               << (isDynamicInputShape ? " (dynamic)" : "") << std::endl
-              << "      #Outputs   : " << numOutputNodes << std::endl
-              << "      #Classes   : " << classNames.size() << std::endl;
+              << L"      #Outputs   : " << numOutputNodes << std::endl
+              << L"      #Classes   : " << classNames.size() << std::endl;
+    */
 }
 
-inline cv::Mat YOLOv11SegDetector::preprocess(const cv::Mat &image,
-                                             float *&blobPtr,
-                                             std::vector<int64_t> &inputTensorShape) 
+inline cv::Mat YOLOv11SegDetector::preprocess(const cv::Mat& image,
+    float*& blobPtr,
+    std::vector<int64_t>& inputTensorShape)
 {
     ScopedTimer timer("Preprocess");
 
     cv::Mat letterboxImage;
     utils::letterBoxSeg(image, letterboxImage, inputImageShape,
-                     cv::Scalar(114,114,114), /*auto_=*/isDynamicInputShape,
-                     /*scaleFill=*/false, /*scaleUp=*/true, /*stride=*/32);
+        cv::Scalar(114, 114, 114), /*auto_=*/isDynamicInputShape,
+        /*scaleFill=*/false, /*scaleUp=*/true, /*stride=*/32);
 
     // Update if dynamic
     inputTensorShape[2] = static_cast<int64_t>(letterboxImage.rows);
     inputTensorShape[3] = static_cast<int64_t>(letterboxImage.cols);
 
-    letterboxImage.convertTo(letterboxImage, CV_32FC3, 1.0f/255.0f);
+    letterboxImage.convertTo(letterboxImage, CV_32FC3, 1.0f / 255.0f);
 
     size_t size = static_cast<size_t>(letterboxImage.rows) * static_cast<size_t>(letterboxImage.cols) * 3;
     blobPtr = new float[size];
@@ -409,7 +97,7 @@ inline cv::Mat YOLOv11SegDetector::preprocess(const cv::Mat &image,
     std::vector<cv::Mat> channels(3);
     for (int c = 0; c < 3; ++c) {
         channels[c] = cv::Mat(letterboxImage.rows, letterboxImage.cols, CV_32FC1,
-                              blobPtr + c * (letterboxImage.rows * letterboxImage.cols));
+            blobPtr + c * (letterboxImage.rows * letterboxImage.cols));
     }
     cv::split(letterboxImage, channels);
 
@@ -417,13 +105,13 @@ inline cv::Mat YOLOv11SegDetector::preprocess(const cv::Mat &image,
 }
 
 std::vector<Segmentation> YOLOv11SegDetector::postprocess(
-    const cv::Size &origSize,
-    const cv::Size &letterboxSize,
-    const std::vector<Ort::Value> &outputs,
+    const cv::Size& origSize,
+    const cv::Size& letterboxSize,
+    const std::vector<Ort::Value>& outputs,
     float confThreshold,
-    float iouThreshold) 
+    float iouThreshold)
 {
-    ScopedTimer timer("PostprocessSeg"); 
+    ScopedTimer timer("PostprocessSeg");
 
     std::vector<Segmentation> results;
 
@@ -548,7 +236,7 @@ std::vector<Segmentation> YOLOv11SegDetector::postprocess(
 
     // Calculate letterbox parameters
     const float gain = std::min(static_cast<float>(letterboxSize.height) / origSize.height,
-                               static_cast<float>(letterboxSize.width) / origSize.width);
+        static_cast<float>(letterboxSize.width) / origSize.width);
     const int scaledW = static_cast<int>(origSize.width * gain);
     const int scaledH = static_cast<int>(origSize.height * gain);
     const float padW = (letterboxSize.width - scaledW) / 2.0f;
@@ -624,10 +312,11 @@ std::vector<Segmentation> YOLOv11SegDetector::postprocess(
     return results;
 }
 
-inline void YOLOv11SegDetector::drawSegmentationsAndBoxes(cv::Mat &image,
-                                                 const std::vector<Segmentation> &results,
-                                                 float maskAlpha) const 
+inline void YOLOv11SegDetector::drawSegmentationsAndBoxes(cv::Mat& image,
+    const std::vector<Segmentation>& results,
+    float maskAlpha) const
 {
+    /*
     for (const auto &seg : results) {
         if (seg.conf < CONFIDENCE_THRESHOLD_SEG) {
             continue;
@@ -687,14 +376,15 @@ inline void YOLOv11SegDetector::drawSegmentationsAndBoxes(cv::Mat &image,
             cv::addWeighted(image, 1.0, colored_mask, maskAlpha, 0, image);
         }
     }
+    */
 }
 
 
-inline void YOLOv11SegDetector::drawSegmentations(cv::Mat &image,
-                                                 const std::vector<Segmentation> &results,
-                                                 float maskAlpha) const 
+inline void YOLOv11SegDetector::drawSegmentations(cv::Mat& image,
+    const std::vector<Segmentation>& results,
+    float maskAlpha) const
 {
-    for (const auto &seg : results) {
+    for (const auto& seg : results) {
         if (seg.conf < CONFIDENCE_THRESHOLD_SEG) {
             continue;
         }
@@ -708,7 +398,8 @@ inline void YOLOv11SegDetector::drawSegmentations(cv::Mat &image,
             cv::Mat mask_gray;
             if (seg.mask.channels() == 3) {
                 cv::cvtColor(seg.mask, mask_gray, cv::COLOR_BGR2GRAY);
-            } else {
+            }
+            else {
                 mask_gray = seg.mask.clone();
             }
 
@@ -727,14 +418,14 @@ inline void YOLOv11SegDetector::drawSegmentations(cv::Mat &image,
     }
 }
 
-inline std::vector<Segmentation> YOLOv11SegDetector::segment(const cv::Mat &image,
-                                                            float confThreshold,
-                                                            float iouThreshold) 
+inline std::vector<Segmentation> YOLOv11SegDetector::segment(const cv::Mat& image,
+    float confThreshold,
+    float iouThreshold)
 {
     ScopedTimer timer("YOLOv11Seg: segment()");
 
-    float *blobPtr = nullptr;
-    std::vector<int64_t> inputShape = {1, 3, inputImageShape.height, inputImageShape.width};
+    float* blobPtr = nullptr;
+    std::vector<int64_t> inputShape = { 1, 3, inputImageShape.height, inputImageShape.width };
     cv::Mat letterboxImg = preprocess(image, blobPtr, inputShape);
 
     size_t inputSize = utils::vectorProduct(inputShape);
@@ -751,7 +442,7 @@ inline std::vector<Segmentation> YOLOv11SegDetector::segment(const cv::Mat &imag
     );
 
     std::vector<Ort::Value> outputs = session.Run(
-        Ort::RunOptions{nullptr},
+        Ort::RunOptions{ nullptr },
         inputNames.data(),
         &inputTensor,
         numInputNodes,
@@ -761,4 +452,3 @@ inline std::vector<Segmentation> YOLOv11SegDetector::segment(const cv::Mat &imag
     cv::Size letterboxSize(static_cast<int>(inputShape[3]), static_cast<int>(inputShape[2]));
     return postprocess(image.size(), letterboxSize, outputs, confThreshold, iouThreshold);
 }
-

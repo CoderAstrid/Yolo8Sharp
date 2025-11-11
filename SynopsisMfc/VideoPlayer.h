@@ -6,6 +6,12 @@
 #include <functional>
 #include <opencv2/opencv.hpp>
 
+
+typedef enum class PlayMode {
+    Timed,       // obey FPS (slower, smooth UI playback)
+    Continuous   // no delay (as fast as possible)
+}playMode;
+
 class VideoPlayer
 {
 public:
@@ -27,7 +33,7 @@ public:
     bool   SeekFrame(int64_t frameIndex);
 
     // Info
-    State  GetState() const { return state_; }
+    State  GetState() const { return state_.load(); }
     int64_t CurrentFrame() const { return curFrame_; }
     int64_t FrameCount()  const { return totalFrames_; }
     double  FPS()         const { return fps_; }
@@ -37,11 +43,25 @@ public:
 
     ~VideoPlayer() { Close(); }
 
+    void SetPlayMode(PlayMode mode) {
+        playMode_ = mode;
+    }
+
+    CString GetTotalTimeStr() const {
+		return totalTimeStr_;
+	}
+    CString GetFrameTimeStr() const {
+		return frameTimeStr_;
+	}
+    CString GetVideoSummary() const {
+        return videoSummary_;
+	}
 private:
     // worker
     void   runLoop();
     bool   grabAndDispatch(); // read current (or next) frame and call callback
-
+    CString FrameToTimestamp(int64_t frameIndex, double fps);
+    void   extractVideoSummary();
 private:
     cv::VideoCapture     cap_;
     std::thread          th_;
@@ -59,4 +79,10 @@ private:
     mutable std::mutex   mtx_;
     std::condition_variable cv_;
     FrameCallback        on_frame_;
+
+    playMode            playMode_ = playMode::Timed;
+    CString             videoPath_;
+    CString             totalTimeStr_;
+    CString			    frameTimeStr_;
+    CString             videoSummary_;
 };

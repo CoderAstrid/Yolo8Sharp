@@ -1,4 +1,4 @@
-#include "pch.h"
+Ôªø#include "pch.h"
 #include "VideoPlayer.h"
 #include <string>
 #include <chrono>
@@ -31,7 +31,8 @@ static std::string TCHAR_to_utf8(const TCHAR* path)
 
 bool VideoPlayer::Open(const TCHAR* path)
 {
-    Close();
+    if (state_ != State::Stopped)
+        Close(); // ensure clean start
 
     const std::string p = TCHAR_to_utf8(path);
     if (p.empty())
@@ -48,19 +49,56 @@ bool VideoPlayer::Open(const TCHAR* path)
         return false;
     }
 
+    videoPath_ = path;
     totalFrames_ = static_cast<int64_t>(cap_.get(cv::CAP_PROP_FRAME_COUNT)); // can be -1 for some codecs
     fps_ = cap_.get(cv::CAP_PROP_FPS);
     if (fps_ <= 1e-3)
         fps_ = 30.0; // fallback
 
     curFrame_ = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
+    totalTimeStr_ = FrameToTimestamp(totalFrames_, fps_);
+    frameTimeStr_ = FrameToTimestamp(0, fps_);
+    extractVideoSummary();
 
     grabAndDispatch(); // deliver first frame
 
     state_ = State::Paused;
     alive_ = true;
     th_ = std::thread(&VideoPlayer::runLoop, this);
+
     return true;
+}
+
+void VideoPlayer::extractVideoSummary()
+{   
+    if(!cap_.isOpened())
+        return;
+    int64_t frameCount = static_cast<int64_t>(cap_.get(cv::CAP_PROP_FRAME_COUNT));
+    double fps = cap_.get(cv::CAP_PROP_FPS);
+    double duration = (fps > 0) ? frameCount / fps : 0.0;
+    int width = static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_WIDTH));
+    int height = static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_HEIGHT));
+    int fourcc = static_cast<int>(cap_.get(cv::CAP_PROP_FOURCC));
+
+    char codec[] = {
+        static_cast<char>(fourcc & 0xFF),
+        static_cast<char>((fourcc >> 8) & 0xFF),
+        static_cast<char>((fourcc >> 16) & 0xFF),
+        static_cast<char>((fourcc >> 24) & 0xFF),
+        0
+    };
+
+    CString s;
+    s.Format(_T(
+        "Video Summary:\n"
+        "  Path: %s\n"
+        "  Size: %d x %d\n"
+        "  FPS: %.2f\n"
+        "  Frames: %lld\n"
+        "  Duration: %.2f seconds\n"
+        "  Codec: %s\n"),
+        videoPath_, width, height, fps, frameCount, duration, CString(codec));
+    videoSummary_ = s;
 }
 
 void VideoPlayer::Close()
@@ -75,6 +113,11 @@ void VideoPlayer::Close()
     curFrame_ = 0;
     totalFrames_ = -1;
     fps_ = 0.0;
+
+    videoPath_.Empty();
+    totalTimeStr_.Empty();
+    frameTimeStr_.Empty();
+    videoSummary_.Empty();
 }
 
 bool VideoPlayer::Play()
@@ -118,7 +161,7 @@ bool VideoPlayer::NextFrame()
     if (!cap_.isOpened())
         return false;
     state_ = State::Paused;
-    // Weíre already at current frame index; reading advances by 1
+    // We‚Äôre already at current frame index; reading advances by 1
     return grabAndDispatch();
 }
 
@@ -129,7 +172,7 @@ bool VideoPlayer::PrevFrame()
     state_ = State::Paused;
 
     int64_t idx = curFrame_.load();
-    // After a successful read, OpenCVís POS_FRAMES points to ìnextî.
+    // After a successful read, OpenCV‚Äôs POS_FRAMES points to ‚Äúnext‚Äù.
     // So to show previous frame, jump to (idx - 2), then read one.
     int64_t target = idx - 2;
     if (target < 0) 
@@ -162,11 +205,15 @@ void VideoPlayer::runLoop()
             state_ = State::Paused; // end of stream
             continue;
         }
-        auto t1 = steady_clock::now();
-        auto elapsed = t1 - t0;
+        // Mode logic
+        if (playMode_ == PlayMode::Timed) {
+            auto t1 = steady_clock::now();
+            auto elapsed = t1 - t0;
 
-        if (elapsed < frameDur)
-            std::this_thread::sleep_for(frameDur - elapsed);
+            if (elapsed < frameDur)
+                std::this_thread::sleep_for(frameDur - elapsed);
+        }
+        // else Continuous: do not sleep
     }
 }
 
@@ -176,11 +223,30 @@ bool VideoPlayer::grabAndDispatch()
     if (!cap_.read(frame)) 
         return false;
 
-    // POS_FRAMES is now ìnext indexî, so the current frame index is:
+    // POS_FRAMES is now ‚Äúnext index‚Äù, so the current frame index is:
     int64_t posNext = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
     curFrame_ = posNext - 1; // best-effort tracking
+
+    frameTimeStr_ = FrameToTimestamp(curFrame_, fps_);
 
     if (on_frame_) 
         on_frame_(frame, curFrame_.load(), totalFrames_, fps_);
     return true;
+}
+
+CString VideoPlayer::FrameToTimestamp(int64_t frameIndex, double fps)
+{
+    if (fps <= 1e-3)
+        return _T("00:00:00"); // avoid div by 0
+
+    double totalSec = frameIndex / fps;
+
+    int hours = static_cast<int>(totalSec / 3600);
+    int minutes = static_cast<int>((totalSec - hours * 3600) / 60);
+    int seconds = static_cast<int>(totalSec) % 60;
+    // int millis = static_cast<int>((totalSec - static_cast<int>(totalSec)) * 1000);
+
+    CString res;
+    res.Format(_T("%02d:%02d:%02d"), hours, minutes, seconds);
+    return res;
 }

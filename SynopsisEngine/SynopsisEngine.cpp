@@ -68,3 +68,45 @@ vsCode VSENGINE_API vsReleaseYoloModel(vsHandle yoloHandle)
 	g_instances.erase(it);
 	return VS_SUCCESS;
 }
+
+vsCode vsDetectObjects(vsHandle yoloHandle, const unsigned char* imgData, int width, int height, int channels, Detection** outDetections, int* outCount)
+{
+	if (!yoloHandle || !imgData || width <= 0 || height <= 0 || channels <= 0 || !outDetections || !outCount)
+		return VS_ERROR_INVALID_HANDLE;
+
+	std::lock_guard<std::mutex> lock(g_mutex);
+	auto it = g_instances.find(yoloHandle);
+	if (it == g_instances.end())
+		return VS_ERROR_INVALID_HANDLE;
+
+	YoloRunner* runner = it->second.get();
+
+	cv::Mat img;
+	if (channels == 3) {
+		img = cv::Mat(height, width, CV_8UC3, const_cast<unsigned char*>(imgData)).clone();
+	}
+	else if (channels == 4) {
+		img = cv::Mat(height, width, CV_8UC4, const_cast<unsigned char*>(imgData)).clone();
+	}
+	else if (channels == 1) {
+		img = cv::Mat(height, width, CV_8UC1, const_cast<unsigned char*>(imgData)).clone();
+	}
+	else {
+		return VS_ERROR_INVALID_HANDLE;
+	}
+
+	std::vector<Detection> detections = runner->runDetect(img);
+
+	*outCount = static_cast<int>(detections.size());
+	if (*outCount > 0) {
+		*outDetections = new Detection[*outCount];
+		for (int i = 0; i < *outCount; ++i) {
+			(*outDetections)[i] = detections[i];
+		}
+	}
+	else {
+		*outDetections = nullptr;
+	}
+
+	return VS_SUCCESS;
+}

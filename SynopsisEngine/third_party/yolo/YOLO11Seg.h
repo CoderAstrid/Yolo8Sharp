@@ -109,8 +109,8 @@ namespace utils {
 // ============================================================================
 class YOLOv11SegDetector {
 public:
-    YOLOv11SegDetector(const String &modelPath,
-                      const String &labelsPath,
+    YOLOv11SegDetector(const JString&modelPath,
+                      const JString&labelsPath,
                       bool useGPU = false);
 
     // Main API
@@ -127,7 +127,7 @@ public:
                            const std::vector<Segmentation> &results,
                            float maskAlpha = 0.5f) const;
     // Accessors
-    const std::vector<String> &getClassNames()  const { return classNames;  }
+    const std::vector<JString> &getClassNames()  const { return classNames;  }
     const std::vector<cv::Scalar>  &getClassColors() const { return classColors; }
 
 private:
@@ -146,7 +146,7 @@ private:
     size_t numInputNodes  = 0;
     size_t numOutputNodes = 0;
 
-    std::vector<String> classNames;
+    std::vector<JString> classNames;
     std::vector<cv::Scalar>  classColors;
 
     // Helpers

@@ -7,6 +7,7 @@
 #include "VideoPlayer.h"
 #include "PicWndDemo.h"
 #include "SynopsisEngine.h"
+#include "InferenceManager.h"
 
 const UINT WM_FRAME_ARRIVED = ::RegisterWindowMessage(_T("WM_FRAME_ARRIVED"));
 
@@ -29,6 +30,10 @@ public:
 
 private:
 	VideoPlayer m_videoPlayer;
+	InferenceManager m_InfManager;
+	FrameQueue m_frameInQueue;
+	FrameQueue m_frameOutQueue;
+
 	CPicEditWnd m_imageWnd;
 	BOOL		m_bInit;
 	vsHandle    m_YoloHandle;

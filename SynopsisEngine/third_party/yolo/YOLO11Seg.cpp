@@ -1,8 +1,8 @@
 #include "YOLO11Seg.h"
 
 
-inline YOLOv11SegDetector::YOLOv11SegDetector(const String& modelPath,
-    const String& labelsPath,
+YOLOv11SegDetector::YOLOv11SegDetector(const JString& modelPath,
+    const JString& labelsPath,
     bool useGPU)
     : env(ORT_LOGGING_LEVEL_WARNING, "YOLOv11Seg")
 {

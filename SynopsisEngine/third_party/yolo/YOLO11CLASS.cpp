@@ -2,7 +2,7 @@
 #include <tchar.h>
 
 // Implementation of YOLO11Classifier constructor
-YOLO11Classifier::YOLO11Classifier(const String& modelPath, const String& labelsPath,
+YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labelsPath,
     bool useGPU, const cv::Size& targetInputShape)
     : inputImageShape_(targetInputShape) {
     env_ = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNX_CLASSIFICATION_ENV");
@@ -288,7 +288,7 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
     float confidence = sumExp > 0 ? probabilities[bestClassId] / sumExp : 0.0f;
 
     // Get class name
-    String className = _T("Unknown");
+    JString className = _T("Unknown");
     if (bestClassId >= 0 && static_cast<size_t>(bestClassId) < classNames_.size()) {
         className = classNames_[bestClassId];
     }

@@ -51,16 +51,10 @@ public:
 
     bool Init(YoloTask task, const TCHAR* appPath);
     void Release();
+
+    std::vector<Detection> runDetect(const cv::Mat& frame);
 private:
-    Ort::Env env_;
-    Ort::Session session_{ nullptr };
-    Ort::SessionOptions sessionOptions_;
-    Ort::AllocatorWithDefaultOptions allocator_;
-    bool isInitialized_ = false;
-
-    std::vector<std::string> inputNames_;
-    std::vector<std::string> outputNames_;
-
+    YoloTask task_;
     std::unique_ptr<YOLO11Detector> detector_;
     std::unique_ptr<YOLO11Classifier> classifier_;
     std::unique_ptr<YOLO11OBBDetector> obb_;

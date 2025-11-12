@@ -26,6 +26,8 @@ typedef void* vsHandle;
 
 vsCode VSENGINE_API vsInitYoloModel(vsHandle* outYolo, const TCHAR* appPath, YoloTask task = YT_DETECT);
 vsCode VSENGINE_API vsReleaseYoloModel(vsHandle yoloHandle);
+vsCode VSENGINE_API vsDetectObjects(vsHandle yoloHandle, const unsigned char* imgData, int width, int height, int channels, Detection** outDetections, int* outCount);
+
 
 #ifdef __cplusplus
 }

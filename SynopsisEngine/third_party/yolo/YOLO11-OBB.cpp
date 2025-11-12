@@ -2,7 +2,7 @@
 
 
 // Implementation of YOLO11OBBDetector constructor
-YOLO11OBBDetector::YOLO11OBBDetector(const String& modelPath, const String& labelsPath, bool useGPU) {
+YOLO11OBBDetector::YOLO11OBBDetector(const JString& modelPath, const JString& labelsPath, bool useGPU) {
     // Initialize ONNX Runtime environment with warning level
     env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNX_DETECTION");
     sessionOptions = Ort::SessionOptions();

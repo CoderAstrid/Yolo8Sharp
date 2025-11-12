@@ -6,11 +6,11 @@
 #include <functional>
 #include <opencv2/opencv.hpp>
 
-
 typedef enum class PlayMode {
     Timed,       // obey FPS (slower, smooth UI playback)
     Continuous   // no delay (as fast as possible)
 }playMode;
+
 
 class VideoPlayer
 {

@@ -160,7 +160,7 @@ public:
     /**
      * @brief Constructor to initialize the classifier with model and label paths.
      */
-    YOLO11Classifier(const String &modelPath, const String &labelsPath,
+    YOLO11Classifier(const JString&modelPath, const JString&labelsPath,
                     bool useGPU = false, const cv::Size& targetInputShape = cv::Size(224, 224));
 
     /**
@@ -196,7 +196,7 @@ private:
     size_t numInputNodes_{}, numOutputNodes_{};
     int numClasses_{0};
 
-    std::vector<String> classNames_{};
+    std::vector<JString> classNames_{};
 
     void preprocess(const cv::Mat &image, float *&blob, std::vector<int64_t> &inputTensorShape);
     ClassificationResult postprocess(const std::vector<Ort::Value> &outputTensors);

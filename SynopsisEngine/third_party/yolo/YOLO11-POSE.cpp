@@ -2,7 +2,7 @@
 
 
 // Implementation of YOLO11POSEDetector constructor
-YOLO11POSEDetector::YOLO11POSEDetector(const String& modelPath, const String& labelsPath, bool useGPU) {
+YOLO11POSEDetector::YOLO11POSEDetector(const JString& modelPath, const JString& labelsPath, bool useGPU) {
     // Initialize ONNX Runtime environment with warning level
     env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNX_DETECTION");
     sessionOptions = Ort::SessionOptions();

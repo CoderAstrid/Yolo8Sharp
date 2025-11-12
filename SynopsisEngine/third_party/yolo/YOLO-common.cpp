@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 #include <chrono>
-
+#include <numeric>
 #include <unordered_map>
 #include <thread>
 
@@ -97,10 +97,10 @@ namespace utils {
         return dst;
     }
 
-    std::vector<String>
-        getClassNames(const String& path
+    std::vector<JString>
+        getClassNames(const JString& path
     ) {
-        std::vector<String> classNames;
+        std::vector<JString> classNames;
 #if defined(UNICODE)
         std::wifstream infile(path);
 #else
@@ -108,7 +108,7 @@ namespace utils {
 #endif
 
         if (infile) {
-            String line;
+            JString line;
             while (getline(infile, line)) {
                 // Remove carriage return if present (for Windows compatibility)
                 if (!line.empty() && line.back() == '\r')
@@ -854,7 +854,7 @@ namespace utils {
     }
 
     std::vector<cv::Scalar> generateColors(
-        const std::vector<String>& classNames,
+        const std::vector<JString>& classNames,
         int seed
     ) {
         // Static cache to store colors based on class names to avoid regenerating
@@ -863,7 +863,7 @@ namespace utils {
         // Compute a hash key based on class names to identify unique class configurations
         size_t hashKey = 0;
         for (const auto& name : classNames) {
-            hashKey ^= std::hash<String>{}(name)+0x9e3779b9 + (hashKey << 6) + (hashKey >> 2);
+            hashKey ^= std::hash<JString>{}(name)+0x9e3779b9 + (hashKey << 6) + (hashKey >> 2);
         }
 
         // Check if colors for this class configuration are already cached
@@ -890,7 +890,7 @@ namespace utils {
     }
 
      std::vector<cv::Scalar> generateColorsObb(
-         const std::vector<String>& classNames, 
+         const std::vector<JString>& classNames,
          int seed
      ) {
         // Static cache to store colors based on class names to avoid regenerating
@@ -899,7 +899,7 @@ namespace utils {
         // Compute a hash key based on class names to identify unique class configurations
         size_t hashKey = 0;
         for (const auto& name : classNames) {
-            hashKey ^= std::hash<String>{}(name)+0x9e3779b9 + (hashKey << 6) + (hashKey >> 2);
+            hashKey ^= std::hash<JString>{}(name)+0x9e3779b9 + (hashKey << 6) + (hashKey >> 2);
         }
 
         // Check if colors for this class configuration are already cached
@@ -926,13 +926,13 @@ namespace utils {
      }
 
      std::vector<cv::Scalar> generateColorsSeg(
-         const std::vector<String>& classNames,
+         const std::vector<JString>& classNames,
          int seed
      ) {
          static std::unordered_map<size_t, std::vector<cv::Scalar>> cache;
          size_t key = 0;
          for (const auto& name : classNames) {
-             size_t h = std::hash<String>{}(name);
+             size_t h = std::hash<JString>{}(name);
              key ^= (h + 0x9e3779b9 + (key << 6) + (key >> 2));
          }
          auto it = cache.find(key);

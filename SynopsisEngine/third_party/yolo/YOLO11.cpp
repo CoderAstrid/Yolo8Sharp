@@ -2,8 +2,8 @@
 
 // Implementation of YOLO11Detector constructor
 YOLO11Detector::YOLO11Detector(
-    const String& modelPath,
-    const String& labelsPath,
+    const JString& modelPath,
+    const JString& labelsPath,
     bool useGPU
 ) {
     // Initialize ONNX Runtime environment with warning level

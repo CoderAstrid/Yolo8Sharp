@@ -210,7 +210,7 @@ public:
      * @param labelsPath Path to the file containing class labels.
      * @param useGPU Whether to use GPU for inference (default is false).
      */
-    YOLO11OBBDetector(const String &modelPath, const String &labelsPath, bool useGPU = false);
+    YOLO11OBBDetector(const JString&modelPath, const JString&labelsPath, bool useGPU = false);
     
     /**
      * @brief Runs detection on the provided image.
@@ -248,7 +248,7 @@ private:
 
     size_t numInputNodes, numOutputNodes;          // Number of input and output nodes in the model
 
-    std::vector<String> classNames;            // Vector of class names loaded from file
+    std::vector<JString> classNames;            // Vector of class names loaded from file
     std::vector<cv::Scalar> classColors;            // Vector of colors for each class
 
     /**

@@ -39,6 +39,12 @@
     <ClInclude Include="VideoPlayer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="FrameProc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="InferenceManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SynopsisMfc.cpp">
@@ -54,6 +60,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="VideoPlayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="InferenceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -169,6 +169,9 @@ void CSynopsisMfcDlg::FrameRcvCallback(const cv::Mat& f, int64_t frameIdx, int64
 		CString timeInfo;
 		timeInfo.Format(_T("%s / %s"), timeStr.GetString(), totalStr.GetString());
 		m_lblTimeStamp.SetWindowText(timeInfo);
+
+		double ts = static_cast<double>(frameIdx) / fps;
+		m_frameInQueue.push(FrameInfo(f, frameIdx, ts));
 	}
 	
 	// (Optionally store idx/total/fps for a status bar)	
@@ -358,6 +361,8 @@ void CSynopsisMfcDlg::InitControls()
 	m_imageWnd.CreateWnd(this, rcWnd, IDC_PIC_FRAME, 0);
 	vsInitYoloModel(&m_YoloHandle, GetAppPath());
 
+	m_InfManager.start(&m_frameInQueue, &m_frameOutQueue, InferenceMode::FullSequence, m_YoloHandle);
+
 }
 
 void CSynopsisMfcDlg::OnBnClickedRdSegment()
@@ -441,4 +446,5 @@ void CSynopsisMfcDlg::OnDestroy()
 		vsReleaseYoloModel(m_YoloHandle);
 		m_YoloHandle = nullptr;
 	}
+	m_InfManager.stop();
 }

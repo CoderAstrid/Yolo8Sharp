@@ -1,4 +1,8 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "YOLO11Seg.h"
+#include "..\..\Logger.h"
 
 
 YOLOv11SegDetector::YOLOv11SegDetector(const JString& modelPath,
@@ -15,10 +19,10 @@ YOLOv11SegDetector::YOLOv11SegDetector(const JString& modelPath,
     if (useGPU && std::find(providers.begin(), providers.end(), "CUDAExecutionProvider") != providers.end()) {
         OrtCUDAProviderOptions cudaOptions;
         sessionOptions.AppendExecutionProvider_CUDA(cudaOptions);
-        std::cout << "[INFO] Using GPU (CUDA) for YOLOv11 Seg inference.\n";
+        LOG_INFO("[YOLOv11SegDetector] Using GPU (CUDA) for YOLOv11 Seg inference.");
     }
     else {
-        std::cout << "[INFO] Using CPU for YOLOv11 Seg inference.\n";
+        LOG_INFO("[YOLOv11SegDetector] Using CPU for YOLOv11 Seg inference.");
     }
 
     session = Ort::Session(env, modelPath.c_str(), sessionOptions);

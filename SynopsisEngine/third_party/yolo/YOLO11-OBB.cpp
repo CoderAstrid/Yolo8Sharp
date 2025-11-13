@@ -1,4 +1,8 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "YOLO11-OBB.h"
+#include "..\..\Logger.h"
 
 
 // Implementation of YOLO11OBBDetector constructor
@@ -18,14 +22,14 @@ YOLO11OBBDetector::YOLO11OBBDetector(const JString& modelPath, const JString& la
 
     // Configure session options based on whether GPU is to be used and available
     if (useGPU && cudaAvailable != availableProviders.end()) {
-        std::cout << "Inference device: GPU" << std::endl;
+        LOG_INFO("[YOLO11OBBDetector] Inference device: GPU");
         sessionOptions.AppendExecutionProvider_CUDA(cudaOption); // Append CUDA execution provider
     }
     else {
         if (useGPU) {
-            std::cout << "GPU is not supported by your ONNXRuntime build. Fallback to CPU." << std::endl;
+            LOG_INFO("[YOLO11OBBDetector] GPU is not supported by your ONNXRuntime build. Fallback to CPU.");
         }
-        std::cout << "Inference device: CPU" << std::endl;
+        LOG_INFO("[YOLO11OBBDetector] Inference device: CPU");
     }
 
     // Load the ONNX model into the session
@@ -64,7 +68,7 @@ YOLO11OBBDetector::YOLO11OBBDetector(const JString& modelPath, const JString& la
     classNames = utils::getClassNames(labelsPath);
     classColors = utils::generateColorsObb(classNames);
 
-    std::cout << "Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes." << std::endl;
+    LOG_INFO_STREAM("[YOLO11OBBDetector] Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes.");
 }
 
 // Preprocess function implementation
@@ -92,9 +96,9 @@ cv::Mat YOLO11OBBDetector::preprocess(const cv::Mat& image, float*& blob, std::v
     }
     cv::split(resizedImage, chw); // Split channels into the blob
 
-    DEBUG_PRINT("Preprocessing completed")
+    LOG_DEBUG("[YOLO11OBBDetector] Preprocessing completed");
 
-        return resizedImage;
+    return resizedImage;
 }
 
 std::vector<ObbDetection> YOLO11OBBDetector::postprocess(
@@ -137,7 +141,7 @@ std::vector<ObbDetection> YOLO11OBBDetector::postprocess(
 
     // Wrap raw output data into a cv::Mat and transpose it.
     // After transposition, each row corresponds to one detection with layout:
-    // [x, y, w, h, score_0, score_1, …, score_(num_labels-1), angle]
+    // [x, y, w, h, score_0, score_1, ï¿½, score_(num_labels-1), angle]
     cv::Mat output = cv::Mat(num_features, num_detections, CV_32F, const_cast<float*>(rawOutput));
     output = output.t(); // Now shape: [num_detections, num_features]
 
@@ -201,7 +205,7 @@ std::vector<ObbDetection> YOLO11OBBDetector::postprocess(
 
 
 
-    DEBUG_PRINT("Postprocessing completed");
+    LOG_DEBUG("[YOLO11OBBDetector] Postprocessing completed");
     return post_nms_detections;
 }
 

@@ -8,10 +8,12 @@
 //#include <afxwin.h>
 #include <afxext.h>
 //#define _MSC_STDINT_H_		//  [9/26/2019 Jewel]
+#include "yolo_define.h"
 
 #include "ximage/ximage.h"
 #pragma comment(lib, "cximagecrtu.lib")
 #include <vector>
+#include <mutex>
 
 const UINT WM_READY_RECORG_MSG = ::RegisterWindowMessage(_T("WM_READY_RECORG_MSG"));
 
@@ -31,6 +33,7 @@ public:
 	int GetRealHeight() const { return m_iHeight; }
 		
 	void ShowResult(bool success, const CString& msg);
+	void DrawDetections(Detection* pDetections, int nCount);
 private:
 	void calculateScale(int cx, int cy);
 	bool isInRect(const CPoint& pt) const;
@@ -52,6 +55,8 @@ private:
 
 	bool			m_bResult;
 	CString			m_sResult;
+	std::vector<Detection> m_detections;
+	mutable std::mutex m_imageMutex; // Protect image access from multiple threads
 protected:
 	void DrawContents(CDC* pDC, const CRect& rc);
 	DECLARE_MESSAGE_MAP()

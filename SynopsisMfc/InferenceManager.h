@@ -2,19 +2,17 @@
 
 #include "FrameProc.h"
 #include "SynopsisEngine.h"
-
-enum class InferenceMode {
-    Realtime,     // Only process latest frame (drop older)
-    FullSequence  // Process every frame
-};
+#include "VideoPlayer.h"
 
 class InferenceManager {
 public:
     void start(
         FrameQueue* inputQueue,
         FrameQueue* outputQueue,
-        InferenceMode mode,
-        vsHandle detector
+        PlayMode playMode,
+        vsHandle detector,
+        CWnd* parent,
+        UINT msgID
     );
 
     void stop();
@@ -22,9 +20,11 @@ private:
     void loop();
     std::thread th_;
     std::atomic<bool> stopFlag_{ false };
-    InferenceMode mode_;
+    PlayMode playMode_;
     FrameQueue* inputQueue_ = nullptr;
     FrameQueue* outputQueue_ = nullptr;
     vsHandle detector_ = nullptr;
+    CWnd* parent_ = nullptr;
+    UINT msgID_ = 0;
 };
 

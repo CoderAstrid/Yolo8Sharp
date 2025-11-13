@@ -8,6 +8,7 @@
 #include "SynopsisMfcDlg.h"
 #include "afxdialogex.h"
 #include <mutex>
+#include "Logger.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -58,6 +59,11 @@ CxImage MatToCxImage(const cv::Mat& mat)
 
 	// Create CxImage with the same dimensions and bit depth
 	CxImage cximg(width, height, bpp, CXIMAGE_FORMAT_BMP);
+	
+	// Validate that the image was created successfully
+	if (!cximg.IsValid()) {
+		return CxImage(); // Return invalid image
+	}
 
 	// Convert color space if needed (OpenCV uses BGR, CxImage expects RGB)
 	cv::Mat rgb;
@@ -72,7 +78,14 @@ CxImage MatToCxImage(const cv::Mat& mat)
 	for (int y = 0; y < height; ++y)
 	{
 		BYTE* dst = cximg.GetBits(height - 1 - y); // CxImage is bottom-up
+		if (dst == nullptr) {
+			// Failed to get bits, return invalid image
+			return CxImage();
+		}
 		const BYTE* src = rgb.ptr<BYTE>(y);
+		if (src == nullptr) {
+			return CxImage();
+		}
 		memcpy(dst, src, width * mat.channels());
 	}
 
@@ -134,6 +147,8 @@ BEGIN_MESSAGE_MAP(CSynopsisMfcDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BTN_NEXTFRAME, &CSynopsisMfcDlg::OnBnClickedBtnNextframe)
 	ON_BN_CLICKED(IDC_BTN_PREVFRAME, &CSynopsisMfcDlg::OnBnClickedBtnPrevframe)
 	ON_REGISTERED_MESSAGE(WM_FRAME_ARRIVED, &CSynopsisMfcDlg::OnArrivedFrame)
+	ON_REGISTERED_MESSAGE(WM_PROCESSED_FRAME, &CSynopsisMfcDlg::OnProcessedFrame)
+
 	ON_BN_CLICKED(IDC_RD_SEGMENT, &CSynopsisMfcDlg::OnBnClickedRdSegment)
 	ON_BN_CLICKED(IDC_RD_DETECT, &CSynopsisMfcDlg::OnBnClickedRdDetect)
 	ON_BN_CLICKED(IDC_RD_CLASSIFY, &CSynopsisMfcDlg::OnBnClickedRdClassify)
@@ -141,6 +156,7 @@ BEGIN_MESSAGE_MAP(CSynopsisMfcDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_RD_OBB, &CSynopsisMfcDlg::OnBnClickedRdObb)
 	ON_WM_TIMER()
 	ON_WM_HSCROLL()
+	ON_CBN_SELCHANGE(IDC_CB_PLAYMODE, &CSynopsisMfcDlg::OnCbnSelchangeCbPlaymode)
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
@@ -150,28 +166,169 @@ END_MESSAGE_MAP()
 
 LRESULT CSynopsisMfcDlg::OnArrivedFrame(WPARAM wParam, LPARAM lParam)
 {
-	return 0;
+	return 0L;
+}
+
+LRESULT CSynopsisMfcDlg::OnProcessedFrame(WPARAM wParam, LPARAM lParam)
+{	
+	int count = (int)(wParam >> 3);
+	int mode = (int)(wParam & 0x7);
+	
+	LOG_DEBUG_STREAM("[OnProcessedFrame] Received message: count=" << count << ", mode=" << mode);
+	
+	if (mode == 1) {
+		// Extract DetectionResult struct
+		struct DetectionResult {
+			Detection* detections;
+			int count;
+			int64_t frameIndex;
+			PlayMode playMode;
+		};
+		DetectionResult* result = reinterpret_cast<DetectionResult*>(lParam);
+		
+		if (result == nullptr) {
+			return 0L;
+		}
+		
+		// Handle count == 0 case (no detections, but frame was processed)
+		if (result->count <= 0 || result->detections == nullptr) {
+			// Frame was processed but no detections found
+			if (result->playMode == PlayMode::Timed) {
+				// In Timed mode, clear detections if this matches current frame
+				int64_t currentFrame;
+				{
+					std::lock_guard<std::mutex> lock(mtx_);
+					currentFrame = m_currentDisplayedFrame;
+				}
+				if (result->frameIndex == currentFrame) {
+					m_imageWnd.DrawDetections(nullptr, 0);
+				}
+				// Also clear from cache
+				{
+					std::lock_guard<std::mutex> lock(m_detectionCacheMutex);
+					m_detectionCache.erase(result->frameIndex);
+				}
+			} else {
+				// In Continuous mode, clear detections immediately
+				m_imageWnd.DrawDetections(nullptr, 0);
+			}
+			delete result;
+			return 0L;
+		}
+		
+		// Handle based on play mode
+		// Timed = sync with video playback, Continuous = display as fast as possible
+		if (result->playMode == PlayMode::Timed) {
+			// Timed mode: Store in cache, only display if matches current frame
+			{
+				std::lock_guard<std::mutex> lock(m_detectionCacheMutex);
+				m_detectionCache[result->frameIndex].clear();
+				for (int i = 0; i < result->count; i++) {
+					m_detectionCache[result->frameIndex].push_back(result->detections[i]);
+				}
+				// Clean up old cache entries (keep only last 100 frames)
+				if (m_detectionCache.size() > 100) {
+					auto it = m_detectionCache.begin();
+					m_detectionCache.erase(it);
+				}
+			}
+			
+			// Check if this matches currently displayed frame
+			int64_t currentFrame;
+			{
+				std::lock_guard<std::mutex> lock(mtx_);
+				currentFrame = m_currentDisplayedFrame;
+			}
+			
+			// Log for debugging
+			if (result->count > 0) {
+				LOG_DEBUG_STREAM("[OnProcessedFrame] Timed mode: result frame=" << result->frameIndex 
+					<< ", current frame=" << currentFrame << ", detections=" << result->count);
+			}
+			
+			if (result->frameIndex == currentFrame) {
+				// Exact match - display immediately
+				m_imageWnd.DrawDetections(result->detections, result->count);
+				LOG_DEBUG_STREAM("[OnProcessedFrame] Displayed " << result->count << " detections for frame " << currentFrame);
+			} else {
+				// Frame mismatch - will be displayed when FrameRcvCallback checks cache
+				LOG_DEBUG_STREAM("[OnProcessedFrame] Frame mismatch: cached detections for frame " 
+					<< result->frameIndex << ", current frame is " << currentFrame);
+			}
+		}
+		else {
+			// Continuous mode: Display immediately regardless of frame index
+			LOG_DEBUG_STREAM("[OnProcessedFrame] Continuous mode: displaying " << result->count << " detections immediately");
+			m_imageWnd.DrawDetections(result->detections, result->count);
+		}
+		
+		// Clean up
+		delete[] result->detections;
+		delete result;
+	}
+
+	return 0L;
 }
 
 void CSynopsisMfcDlg::FrameRcvCallback(const cv::Mat& f, int64_t frameIdx, int64_t total, double fps)
 {
-	std::scoped_lock lk(mtx_);
-	frame_bgr_ = f.clone();
+	// Minimize lock time - only protect frame_bgr_ update
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		frame_bgr_ = f.clone();
+		m_currentDisplayedFrame = frameIdx; // Update current displayed frame index
+	}
 
-	auto img = MatToCxImage(frame_bgr_);
-	m_imageWnd.SetImage(img);
-	auto pos = m_videoPlayer.CurrentFrame();
+	// Push frame to queue immediately (non-blocking, outside of mutex)
+	double ts = static_cast<double>(frameIdx) / fps;
+	FrameInfo frameInfo(f, frameIdx, ts);
+	
+	// In Continuous mode: drop oldest when full (process latest only)
+	// In Timed mode: don't drop (let queue grow, InferenceManager will skip if needed)
+	bool dropOldest = (m_playMode == PlayMode::Continuous);
+	bool pushed = m_frameInQueue.push(frameInfo, dropOldest);
+	if (!pushed) {
+		// This should only happen if queue is shutdown
+		LOG_DEBUG_STREAM("[FrameRcvCallback] Frame " << frameIdx << " rejected (queue shutdown?)");
+	} else {
+		// Debug: log every 30 frames to verify queue is working
+		if (frameIdx % 30 == 0) {
+			LOG_DEBUG_STREAM("[FrameRcvCallback] Pushed frame " << frameIdx 
+				<< ", queue size: " << m_frameInQueue.size());
+		}
+	}
 
-	if (GetSafeHwnd() && IsWindow(GetSafeHwnd())) {		
+	// UI updates (these should be fast, but done outside main mutex)
+	if (GetSafeHwnd() && IsWindow(GetSafeHwnd())) {
+		auto img = MatToCxImage(frame_bgr_);
+		m_imageWnd.SetImage(img);
+		auto pos = m_videoPlayer.CurrentFrame();
+		
 		m_seekVideo.SetPos((int)pos);
 		CString timeStr = m_videoPlayer.GetFrameTimeStr();
 		CString totalStr = m_videoPlayer.GetTotalTimeStr();
 		CString timeInfo;
 		timeInfo.Format(_T("%s / %s"), timeStr.GetString(), totalStr.GetString());
 		m_lblTimeStamp.SetWindowText(timeInfo);
-
-		double ts = static_cast<double>(frameIdx) / fps;
-		m_frameInQueue.push(FrameInfo(f, frameIdx, ts));
+	}
+	
+	// For Timed mode: Check cache and display matching detections
+	if (m_playMode == PlayMode::Timed) {
+		std::lock_guard<std::mutex> lock(m_detectionCacheMutex);
+		auto it = m_detectionCache.find(frameIdx);
+		if (it != m_detectionCache.end() && !it->second.empty()) {
+			// Display cached detections for this frame
+			LOG_DEBUG_STREAM("[FrameRcvCallback] Found cached detections for frame " << frameIdx 
+				<< ", count: " << it->second.size());
+			m_imageWnd.DrawDetections(it->second.data(), static_cast<int>(it->second.size()));
+		} else {
+			// Clear detections if no cached results for this frame
+			if (frameIdx % 30 == 0) {  // Log occasionally to avoid spam
+				LOG_DEBUG_STREAM("[FrameRcvCallback] No cached detections for frame " << frameIdx 
+					<< ", cache size: " << m_detectionCache.size());
+			}
+			m_imageWnd.DrawDetections(nullptr, 0);
+		}
 	}
 	
 	// (Optionally store idx/total/fps for a status bar)	
@@ -292,6 +449,13 @@ void CSynopsisMfcDlg::OnBnClickedBtnBrowser()
 	m_txtPath.SetWindowText(filename);
 	m_videoPlayer.Stop();
 
+	// Clear detection cache when opening new video
+	{
+		std::lock_guard<std::mutex> lock(m_detectionCacheMutex);
+		m_detectionCache.clear();
+	}
+	m_currentDisplayedFrame = -1;
+
 	HWND hwnd = m_imageWnd.GetSafeHwnd();
 	m_videoPlayer.SetCallback([this](const cv::Mat& frame, int64_t idx, int64_t total, double fps){
 		FrameRcvCallback(frame, idx, total, fps);
@@ -336,9 +500,10 @@ void CSynopsisMfcDlg::OnBnClickedBtnPlay()
 
 void CSynopsisMfcDlg::OnBnClickedBtnStop()
 {
-	if (m_videoPlayer.GetState() == VideoPlayer::State::Playing) {
-		m_videoPlayer.Stop();
-	}
+	// Stop works from any state (Playing, Paused, etc.)
+	m_videoPlayer.Stop();
+	// Update UI button state
+	m_btnPlayPause.SetWindowText(_T("▶"));
 }
 
 
@@ -353,6 +518,41 @@ void CSynopsisMfcDlg::OnBnClickedBtnPrevframe()
 	m_videoPlayer.PrevFrame();
 }
 
+void CSynopsisMfcDlg::SetPlayMode(PlayMode mode)
+{
+	if (m_playMode == mode)
+		return;
+	
+	m_playMode = mode;
+	
+	// Update combobox selection to match (SetCurSel doesn't trigger CBN_SELCHANGE)
+	if (m_cbPlayMode.GetSafeHwnd()) {
+		int sel = (mode == PlayMode::Timed) ? 0 : 1;
+		m_cbPlayMode.SetCurSel(sel);
+	}
+	
+	// Also update video player's play mode
+	m_videoPlayer.SetPlayMode(mode);
+	
+	// Restart inference manager with new mode
+	m_InfManager.stop();
+	
+	// Reset queues (clear shutdown flag and clear contents)
+	m_frameInQueue.reset();
+	m_frameOutQueue.reset();
+	
+	// Clear cache when switching modes
+	{
+		std::lock_guard<std::mutex> lock(m_detectionCacheMutex);
+		m_detectionCache.clear();
+	}
+	
+	// Restart with new mode
+	m_InfManager.start(&m_frameInQueue, &m_frameOutQueue, 
+		m_playMode, 
+		m_YoloHandle, this, WM_PROCESSED_FRAME);
+}
+
 void CSynopsisMfcDlg::InitControls()
 {
 	CRect rcWnd;
@@ -361,8 +561,34 @@ void CSynopsisMfcDlg::InitControls()
 	m_imageWnd.CreateWnd(this, rcWnd, IDC_PIC_FRAME, 0);
 	vsInitYoloModel(&m_YoloHandle, GetAppPath());
 
-	m_InfManager.start(&m_frameInQueue, &m_frameOutQueue, InferenceMode::FullSequence, m_YoloHandle);
+	// Initialize play mode combobox
+	m_cbPlayMode.ResetContent();
+	m_cbPlayMode.AddString(_T("Timed"));           // Index 0 = Timed (sync with video)
+	m_cbPlayMode.AddString(_T("Continuous"));     // Index 1 = Continuous (as fast as possible)
+	m_cbPlayMode.SetCurSel(m_playMode == PlayMode::Timed ? 0 : 1);
 
+	// Set queue max size to prevent memory issues
+	m_frameInQueue.setMaxSize(MAX_QUEUE_SIZE);
+	m_frameOutQueue.setMaxSize(MAX_QUEUE_SIZE);
+	
+	// Ensure queues are in active state (not shutdown)
+	m_frameInQueue.reset();
+	m_frameOutQueue.reset();
+
+	// Start inference manager with current play mode
+	m_InfManager.start(&m_frameInQueue, &m_frameOutQueue, 
+		m_playMode, 
+		m_YoloHandle, this, WM_PROCESSED_FRAME);
+}
+
+void CSynopsisMfcDlg::OnCbnSelchangeCbPlaymode()
+{
+	int sel = m_cbPlayMode.GetCurSel();
+	if (sel == CB_ERR)
+		return;
+	
+	PlayMode newMode = (sel == 0) ? PlayMode::Timed : PlayMode::Continuous;
+	SetPlayMode(newMode);
 }
 
 void CSynopsisMfcDlg::OnBnClickedRdSegment()

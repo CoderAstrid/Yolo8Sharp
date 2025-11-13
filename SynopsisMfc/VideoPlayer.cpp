@@ -3,6 +3,7 @@
 #include <string>
 #include <chrono>
 #include <filesystem>
+#include "Logger.h"
 
 static std::string TCHAR_to_utf8(const TCHAR* path)
 {
@@ -25,7 +26,7 @@ static std::string TCHAR_to_utf8(const TCHAR* path)
     return std::string(utf8_str.data());
 #else
     // ANSI mode: simple assignment
-    return (tstr != nullptr) ? std::string(tstr) : std::string();
+    return (path != nullptr) ? std::string(path) : std::string();
 #endif
 }
 
@@ -38,14 +39,15 @@ bool VideoPlayer::Open(const TCHAR* path)
     if (p.empty())
         return false;
 
-    OutputDebugStringA(("Opening video: " + p + "\n").c_str());
+    LOG_INFO_STREAM("[VideoPlayer] Opening video: " << p);    
+    
     if (!std::filesystem::exists(p))
-        OutputDebugStringA("File not found!\n");
+        LOG_ERROR("[VideoPlayer] File not found.");
 
     bool ok = cap_.open(p);
     if (!ok) {
         std::string info = cv::getBuildInformation();
-        OutputDebugStringA(("OpenCV Build Info:\n" + info + "\n").c_str());
+        LOG_ERROR_STREAM("[VideoPlayer] Failed to open video. OpenCV Build Info:\n" << info);
         return false;
     }
 
@@ -132,28 +134,61 @@ bool VideoPlayer::Play()
 void VideoPlayer::Pause()
 {
     state_ = State::Paused;
+    cv_.notify_all(); // Wake up thread so it sees the state change
 }
 
 void VideoPlayer::Stop()
 {
+    // Set state to Stopped and notify the thread
     state_ = State::Stopped;
+    cv_.notify_all(); // Wake up the thread so it can check the state
+    
+    // Seek to beginning if video is opened
     if (cap_.isOpened()) {
+        // Use mutex to protect cap_ access from concurrent runLoop() calls
+        std::lock_guard<std::mutex> lk(mtx_);
         cap_.set(cv::CAP_PROP_POS_FRAMES, 0);
         curFrame_ = 0;
+        frameTimeStr_ = FrameToTimestamp(0, fps_);
+        
+        // Deliver the first frame (optional, but useful for UI)
+        cv::Mat frame;
+        if (cap_.read(frame) && !frame.empty()) {
+            curFrame_ = 0;
+            if (on_frame_) {
+                on_frame_(frame, 0, totalFrames_, fps_);
+            }
+        }
     }
-    // deliver the first frame (optional)
-    grabAndDispatch();
 }
 
 bool VideoPlayer::SeekFrame(int64_t frameIndex)
 {
     if (!cap_.isOpened() || frameIndex < 0) 
         return false;
+    
+    // Pause playback during seek
+    state_ = State::Paused;
+    cv_.notify_all();
+    
+    std::unique_lock<std::mutex> lk(mtx_);
+    
     // Set position (OpenCV expects double)
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, static_cast<double>(frameIndex)))
         return false;
-    curFrame_ = frameIndex;
-    return grabAndDispatch();
+    
+    cv::Mat frame;
+    if (!cap_.read(frame) || frame.empty())
+        return false;
+    
+    int64_t posNext = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
+    curFrame_ = posNext - 1;
+    frameTimeStr_ = FrameToTimestamp(curFrame_, fps_);
+    
+    lk.unlock();
+    if (on_frame_)
+        on_frame_(frame, curFrame_.load(), totalFrames_, fps_);
+    return true;
 }
 
 bool VideoPlayer::NextFrame()
@@ -161,8 +196,22 @@ bool VideoPlayer::NextFrame()
     if (!cap_.isOpened())
         return false;
     state_ = State::Paused;
-    // We’re already at current frame index; reading advances by 1
-    return grabAndDispatch();
+    cv_.notify_all(); // Wake up thread so it sees the state change
+    
+    // We're already at current frame index; reading advances by 1
+    std::unique_lock<std::mutex> lk(mtx_);
+    cv::Mat frame;
+    if (!cap_.read(frame) || frame.empty())
+        return false;
+    
+    int64_t posNext = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
+    curFrame_ = posNext - 1;
+    frameTimeStr_ = FrameToTimestamp(curFrame_, fps_);
+    
+    lk.unlock();
+    if (on_frame_)
+        on_frame_(frame, curFrame_.load(), totalFrames_, fps_);
+    return true;
 }
 
 bool VideoPlayer::PrevFrame()
@@ -170,9 +219,12 @@ bool VideoPlayer::PrevFrame()
     if (!cap_.isOpened()) 
         return false;
     state_ = State::Paused;
+    cv_.notify_all(); // Wake up thread so it sees the state change
 
+    std::unique_lock<std::mutex> lk(mtx_);
+    
     int64_t idx = curFrame_.load();
-    // After a successful read, OpenCV’s POS_FRAMES points to “next”.
+    // After a successful read, OpenCV's POS_FRAMES points to "next".
     // So to show previous frame, jump to (idx - 2), then read one.
     int64_t target = idx - 2;
     if (target < 0) 
@@ -181,8 +233,18 @@ bool VideoPlayer::PrevFrame()
     if (!cap_.set(cv::CAP_PROP_POS_FRAMES, static_cast<double>(target)))
         return false;
 
-    curFrame_ = target;
-    return grabAndDispatch();
+    cv::Mat frame;
+    if (!cap_.read(frame) || frame.empty())
+        return false;
+    
+    int64_t posNext = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
+    curFrame_ = posNext - 1;
+    frameTimeStr_ = FrameToTimestamp(curFrame_, fps_);
+    
+    lk.unlock();
+    if (on_frame_)
+        on_frame_(frame, curFrame_.load(), totalFrames_, fps_);
+    return true;
 }
 
 void VideoPlayer::runLoop()
@@ -192,19 +254,39 @@ void VideoPlayer::runLoop()
 
     while (alive_)
     {
-        if (state_ != State::Playing) {
+        State currentState = state_.load();
+        
+        // If stopped, wait until state changes (but don't process frames)
+        if (currentState == State::Stopped) {
             std::unique_lock<std::mutex> lk(mtx_);
             cv_.wait(lk, [this] { 
-                return !alive_ || state_ == State::Playing; 
+                return !alive_ || state_ != State::Stopped; 
             });
+            continue; // Check state again after waking
+        }
+        
+        // If paused, wait until playing or stopped
+        if (currentState == State::Paused) {
+            std::unique_lock<std::mutex> lk(mtx_);
+            cv_.wait(lk, [this] { 
+                return !alive_ || state_ == State::Playing || state_ == State::Stopped; 
+            });
+            continue; // Check state again after waking
+        }
+
+        // Only process frames when Playing
+        if (currentState != State::Playing) {
             continue;
         }
 
         auto t0 = steady_clock::now();
         if (!grabAndDispatch()) {
+            // End of stream reached
+            LOG_INFO("[VideoPlayer] End of stream reached, pausing playback");
             state_ = State::Paused; // end of stream
             continue;
         }
+        
         // Mode logic
         if (playMode_ == PlayMode::Timed) {
             auto t1 = steady_clock::now();
@@ -219,16 +301,27 @@ void VideoPlayer::runLoop()
 
 bool VideoPlayer::grabAndDispatch()
 {
+    // Protect cap_ access with mutex to prevent concurrent access from Stop()
+    std::unique_lock<std::mutex> lk(mtx_);
+    
+    // Check if we should still be processing (state might have changed)
+    if (state_ != State::Playing || !cap_.isOpened()) {
+        return false;
+    }
+    
     cv::Mat frame;
-    if (!cap_.read(frame)) 
+    if (!cap_.read(frame) || frame.empty()) 
         return false;
 
-    // POS_FRAMES is now “next index”, so the current frame index is:
+    // POS_FRAMES is now "next index", so the current frame index is:
     int64_t posNext = static_cast<int64_t>(cap_.get(cv::CAP_PROP_POS_FRAMES));
     curFrame_ = posNext - 1; // best-effort tracking
 
     frameTimeStr_ = FrameToTimestamp(curFrame_, fps_);
 
+    // Release lock before calling callback (callback might be slow)
+    lk.unlock();
+    
     if (on_frame_) 
         on_frame_(frame, curFrame_.load(), totalFrames_, fps_);
     return true;

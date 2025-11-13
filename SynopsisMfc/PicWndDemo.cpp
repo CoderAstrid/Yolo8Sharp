@@ -85,13 +85,24 @@ void CPicEditWnd::SetImage(const CString& strFile, bool bUpdate)
 
 void CPicEditWnd::SetImage(const CxImage& newImg, bool bUpdate)
 {
+	std::lock_guard<std::mutex> lock(m_imageMutex);
 	if (m_image.IsValid()) {
 		m_image.Destroy();
 		m_iWidth = m_iHeight = 0;
 	}
-	m_image = newImg;	
-	m_iWidth = m_image.GetWidth();
-	m_iHeight = m_image.GetHeight();
+	// Create a proper copy of the CxImage to avoid issues with internal resources
+	if (newImg.IsValid()) {
+		m_image.Copy(newImg);
+		// Validate the copy succeeded
+		if (m_image.IsValid()) {
+			m_iWidth = m_image.GetWidth();
+			m_iHeight = m_image.GetHeight();
+		} else {
+			m_iWidth = m_iHeight = 0;
+		}
+	} else {
+		m_iWidth = m_iHeight = 0;
+	}
 	ClearState();
 	
 	if (GetSafeHwnd() && IsWindow(GetSafeHwnd())) {
@@ -163,14 +174,71 @@ void CPicEditWnd::OnPaint()
 void CPicEditWnd::DrawContents(CDC* pDC, const CRect& rc)
 {
 	pDC->FillSolidRect(&rc, RGB(49, 49, 49));
-	if (!m_image.IsValid())
-		return;
 	
-	int w = (int)(m_iWidth * m_sScale);
-	int h = (int)(m_iHeight * m_sScale);
-	CRect rcImg(m_dx, m_dy, m_dx + w, m_dy + h);
+	// Lock and make a local copy of image data for drawing
+	CxImage drawImage;
+	int drawWidth = 0, drawHeight = 0;
+	float drawScale = 1.0f;
+	int drawDx = 0, drawDy = 0;
+	std::vector<Detection> drawDetections;
+	
+	{
+		std::lock_guard<std::mutex> lock(m_imageMutex);
+		if (!m_image.IsValid())
+			return;
+		
+		// Create a copy for drawing to avoid holding lock during GDI operations
+		drawImage.Copy(m_image);
+		if (!drawImage.IsValid()) {
+			return; // Copy failed
+		}
+		drawWidth = m_iWidth;
+		drawHeight = m_iHeight;
+		drawScale = m_sScale;
+		drawDx = m_dx;
+		drawDy = m_dy;
+		drawDetections = m_detections; // Copy detections vector
+	}
+	
+	// Now draw without holding the lock
+	int w = (int)(drawWidth * drawScale);
+	int h = (int)(drawHeight * drawScale);
+	CRect rcImg(drawDx, drawDy, drawDx + w, drawDy + h);
 
-	m_image.Draw(pDC->GetSafeHdc(), rcImg);
+	HDC hdc = pDC->GetSafeHdc();
+	if (hdc == NULL)
+		return; // Invalid HDC
+	
+	// Validate image before drawing
+	if (!drawImage.IsValid()) {
+		return; // Image is invalid
+	}
+	
+	if (!drawImage.Draw(hdc, rcImg))
+		return; // Draw failed
+
+	Gdiplus::Graphics graphics(hdc);
+	graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+	// Draw detections
+	Gdiplus::Pen pen(Gdiplus::Color(255, 0, 255, 0), 2);
+	for (const auto& det : drawDetections) {
+		Gdiplus::Rect rect(
+			(int)(det.box.x * drawScale) + drawDx,
+			(int)(det.box.y * drawScale) + drawDy,
+			(int)(det.box.width * drawScale),
+			(int)(det.box.height * drawScale)
+		);
+		graphics.DrawRectangle(&pen, rect);
+		CString sName;
+		sName.Format(_T("class id: %d, score: %f"), det.classId, det.conf);
+		graphics.DrawString(
+			(LPCWSTR)sName,
+			-1,
+			&Gdiplus::Font(L"Arial", 12),
+			Gdiplus::PointF((float)rect.X, (float)rect.Y - 20),
+			&Gdiplus::SolidBrush(Gdiplus::Color(255, 255, 0, 0))
+		);
+	}
 }
 
 BOOL CPicEditWnd::PreTranslateMessage(MSG* pMsg)
@@ -300,4 +368,20 @@ BOOL CPicEditWnd::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 	return CWnd::OnSetCursor(pWnd, nHitTest, message);
 }
 
+void CPicEditWnd::DrawDetections(Detection* pDetections, int nCount)
+{
+	if (nCount <= 0 || pDetections == nullptr)
+		return;
+	
+	{
+		std::lock_guard<std::mutex> lock(m_imageMutex);
+		if (!m_image.IsValid())
+			return;
+		m_detections.clear();
+		for (int i = 0; i < nCount; i++) {
+			m_detections.push_back(pDetections[i]);
+		}
+	}
+	Invalidate();
+}
 //.EOF

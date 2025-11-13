@@ -3,6 +3,8 @@
 //
 #pragma once
 #include <mutex>
+#include <map>
+#include <vector>
 #include <opencv2/opencv.hpp>
 #include "VideoPlayer.h"
 #include "PicWndDemo.h"
@@ -10,6 +12,7 @@
 #include "InferenceManager.h"
 
 const UINT WM_FRAME_ARRIVED = ::RegisterWindowMessage(_T("WM_FRAME_ARRIVED"));
+const UINT WM_PROCESSED_FRAME = ::RegisterWindowMessage(_T("WM_PROCESSED_FRAME"));
 
 CxImage MatToCxImage(const cv::Mat& mat);
 
@@ -40,9 +43,15 @@ private:
 
 	std::mutex mtx_;
 	cv::Mat frame_bgr_; // last frame
+	int64_t m_currentDisplayedFrame = -1; // Track currently displayed frame index
+	std::map<int64_t, std::vector<Detection>> m_detectionCache; // Cache detections by frame index (for Timed mode)
+	std::mutex m_detectionCacheMutex; // Protect detection cache
+	PlayMode m_playMode = PlayMode::Timed; // Current play mode (Timed = sync with video, Continuous = as fast as possible)
+	static constexpr size_t MAX_QUEUE_SIZE = 60; // Maximum frames in queue (increased to handle slower detection)
 private:
 	void InitControls();
 	void FrameRcvCallback(const cv::Mat& frame, int64_t frameIdx, int64_t total, double fps);
+	void SetPlayMode(PlayMode mode); // Change play mode and restart inference if needed
 // Implementation
 protected:
 	HICON m_hIcon;
@@ -64,6 +73,8 @@ public:
 	afx_msg void OnBnClickedBtnNextframe();
 	afx_msg void OnBnClickedBtnPrevframe();
 	afx_msg LRESULT OnArrivedFrame(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnProcessedFrame(WPARAM wParam, LPARAM lParam);
+
 	CEdit m_txtPath;
 	CButton m_btnPlayPause;
 	CButton m_btnStop;
@@ -85,6 +96,7 @@ public:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	CComboBox m_cbPlayMode;
+	afx_msg void OnCbnSelchangeCbPlaymode();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	CStatic m_lblTimeStamp;
 	CStatic m_lblInfo;

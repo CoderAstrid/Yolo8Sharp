@@ -7,11 +7,11 @@
 // Detection / Segmentation / Pose
 
 JString MODEL_FNs[YoloTask::YT_MAX] = {
-    _T("yolo11m.onnx"),         // Detect
-    _T("yolo11m-cls.onnx"),     // Classify
-    _T("yolo11m-seg.onnx"),     // Segment
-    _T("yolo11m-pose.onnx"),    // Pose
-    _T("yolo11m-obb.onnx")      // Oriented Bounding Box Detect
+    _T("yolo11n.onnx"),         // Detect
+    _T("yolo11n-cls.onnx"),     // Classify
+    _T("yolo11n-seg.onnx"),     // Segment
+    _T("yolo11n-pose.onnx"),    // Pose
+    _T("yolo11n-obb.onnx")      // Oriented Bounding Box Detect
 };
 
 JString CFG_FNs[YoloTask::YT_MAX] = {

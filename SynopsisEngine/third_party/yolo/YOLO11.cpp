@@ -1,4 +1,5 @@
 #include "YOLO11.h"
+#include "..\..\Logger.h"
 
 // Implementation of YOLO11Detector constructor
 YOLO11Detector::YOLO11Detector(
@@ -11,7 +12,9 @@ YOLO11Detector::YOLO11Detector(
     sessionOptions = Ort::SessionOptions();
 
     // Set number of intra-op threads for parallelism
-    sessionOptions.SetIntraOpNumThreads(std::min(6, static_cast<int>(std::thread::hardware_concurrency())));
+    int nThread = std::thread::hardware_concurrency();
+    nThread = std::min(6, nThread);
+    sessionOptions.SetIntraOpNumThreads(nThread);
     sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
     // Retrieve available execution providers (e.g., CPU, CUDA)
@@ -21,14 +24,14 @@ YOLO11Detector::YOLO11Detector(
 
     // Configure session options based on whether GPU is to be used and available
     if (useGPU && cudaAvailable != availableProviders.end()) {
-        std::cout << "Inference device: GPU" << std::endl;
+        LOG_INFO("[YOLO11Detector] Inference device: GPU");
         sessionOptions.AppendExecutionProvider_CUDA(cudaOption); // Append CUDA execution provider
     }
     else {
         if (useGPU) {
-            std::cout << "GPU is not supported by your ONNXRuntime build. Fallback to CPU." << std::endl;
+            LOG_INFO("GPU is not supported by your ONNXRuntime build. Fallback to CPU.");
         }
-        std::cout << "Inference device: CPU" << std::endl;
+        LOG_INFO("Inference device: CPU");
     }
 
     // Load the ONNX model into the session
@@ -68,7 +71,7 @@ YOLO11Detector::YOLO11Detector(
     classNames = utils::getClassNames(labelsPath);
     classColors = utils::generateColors(classNames);
 
-    std::cout << "Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes." << std::endl;
+    LOG_INFO_STREAM("[YOLO11Detector] Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes.");
 }
 
 // Preprocess function implementation
@@ -96,9 +99,9 @@ cv::Mat YOLO11Detector::preprocess(const cv::Mat& image, float*& blob, std::vect
     }
     cv::split(resizedImage, chw); // Split channels into the blob
 
-    DEBUG_PRINT("Preprocessing completed")
+    LOG_DEBUG("[YOLO11Detector] Preprocessing completed");
 
-        return resizedImage;
+    return resizedImage;
 }
 // Postprocess function to convert raw model output into detections
 std::vector<Detection> YOLO11Detector::postprocess(
@@ -209,9 +212,9 @@ std::vector<Detection> YOLO11Detector::postprocess(
             });
     }
 
-    DEBUG_PRINT("Postprocessing completed") // Debug log for completion
+    LOG_DEBUG("[YOLO11Detector] Postprocessing completed"); // Debug log for completion
 
-        return detections;
+    return detections;
 }
 
 // Detect function implementation

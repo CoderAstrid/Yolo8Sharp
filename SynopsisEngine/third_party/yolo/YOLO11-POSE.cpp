@@ -1,4 +1,8 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "YOLO11-POSE.h"
+#include "..\..\Logger.h"
 
 
 // Implementation of YOLO11POSEDetector constructor
@@ -18,14 +22,14 @@ YOLO11POSEDetector::YOLO11POSEDetector(const JString& modelPath, const JString& 
 
     // Configure session options based on whether GPU is to be used and available
     if (useGPU && cudaAvailable != availableProviders.end()) {
-        std::cout << "Inference device: GPU" << std::endl;
+        LOG_INFO("[YOLO11POSEDetector] Inference device: GPU");
         sessionOptions.AppendExecutionProvider_CUDA(cudaOption); // Append CUDA execution provider
     }
     else {
         if (useGPU) {
-            std::cout << "GPU is not supported by your ONNXRuntime build. Fallback to CPU." << std::endl;
+            LOG_INFO("[YOLO11POSEDetector] GPU is not supported by your ONNXRuntime build. Fallback to CPU.");
         }
-        std::cout << "Inference device: CPU" << std::endl;
+        LOG_INFO("[YOLO11POSEDetector] Inference device: CPU");
     }
 
     // Load the ONNX model into the session
@@ -61,7 +65,7 @@ YOLO11POSEDetector::YOLO11POSEDetector(const JString& modelPath, const JString& 
     numOutputNodes = session.GetOutputCount();
 
 
-    std::cout << "Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes." << std::endl;
+    LOG_INFO_STREAM("[YOLO11POSEDetector] Model loaded successfully with " << numInputNodes << " input nodes and " << numOutputNodes << " output nodes.");
 }
 
 // Preprocess function implementation
@@ -89,9 +93,9 @@ cv::Mat YOLO11POSEDetector::preprocess(const cv::Mat& image, float*& blob, std::
     }
     cv::split(resizedImage, chw); // Split channels into the blob
 
-    DEBUG_PRINT("Preprocessing completed")
+    LOG_DEBUG("[YOLO11POSEDetector] Preprocessing completed");
 
-        return resizedImage;
+    return resizedImage;
 }
 
 
@@ -141,7 +145,7 @@ std::vector<PoseDetection> YOLO11POSEDetector::postprocess(
     const int featuresPerKeypoint = 3;
 
     if (numFeatures != 4 + 1 + numKeypoints * featuresPerKeypoint) {
-        std::cerr << "Invalid output shape for pose estimation model" << std::endl;
+        LOG_ERROR("[YOLO11POSEDetector] Invalid output shape for pose estimation model");
         return detections;
     }
 

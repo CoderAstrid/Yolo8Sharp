@@ -960,6 +960,8 @@ namespace utils {
         const std::string& strategy
     ) {
         if (image.empty()) {
+            // Note: This is in a utility function, so we can't easily add Logger.h here without circular dependencies
+            // Keeping std::cerr for now, or we could pass a logger callback
             std::cerr << "ERROR: Input image to preprocessImageToTensor is empty." << std::endl;
             return;
         }
@@ -1061,7 +1063,7 @@ namespace utils {
             if (detection.conf < confidenceThreshold)
                 continue;
 
-            // Draw bounding box (optional – remove if you prefer only pose visualization)
+            // Draw bounding box (optional ï¿½ remove if you prefer only pose visualization)
             const auto& box = detection.box;
             cv::rectangle(image,
                 cv::Point(box.x, box.y),

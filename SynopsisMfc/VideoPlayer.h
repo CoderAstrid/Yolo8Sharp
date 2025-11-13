@@ -6,10 +6,11 @@
 #include <functional>
 #include <opencv2/opencv.hpp>
 
-typedef enum class PlayMode {
-    Timed,       // obey FPS (slower, smooth UI playback)
-    Continuous   // no delay (as fast as possible)
-}playMode;
+// Unified mode for video playback, frame processing, and detection display
+enum class PlayMode {
+    Timed,       // Sync with playback: obey FPS, process all frames, display synchronized detections
+    Continuous   // As fast as possible: no delay, drop old frames, display detections immediately
+};
 
 
 class VideoPlayer
@@ -38,7 +39,7 @@ public:
     int64_t FrameCount()  const { return totalFrames_; }
     double  FPS()         const { return fps_; }
 
-    // UI callback: called on worker thread — post to UI thread in your handler
+    // UI callback: called on worker thread ï¿½ post to UI thread in your handler
     void   SetCallback(FrameCallback cb) { on_frame_ = std::move(cb); }
 
     ~VideoPlayer() { Close(); }
@@ -80,7 +81,7 @@ private:
     std::condition_variable cv_;
     FrameCallback        on_frame_;
 
-    playMode            playMode_ = playMode::Timed;
+    PlayMode            playMode_ = PlayMode::Timed;
     CString             videoPath_;
     CString             totalTimeStr_;
     CString			    frameTimeStr_;

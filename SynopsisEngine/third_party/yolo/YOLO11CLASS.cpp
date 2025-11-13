@@ -1,5 +1,10 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "YOLO11CLASS.h"
+#include "..\..\Logger.h"
 #include <tchar.h>
+#include <vector>
 
 // Implementation of YOLO11Classifier constructor
 YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labelsPath,
@@ -16,14 +21,14 @@ YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labe
     OrtCUDAProviderOptions cudaOption{};
 
     if (useGPU && cudaAvailable != availableProviders.end()) {
-        DEBUG_PRINT("Attempting to use GPU for inference.");
+        LOG_DEBUG("[YOLO11Classifier] Attempting to use GPU for inference.");
         sessionOptions_.AppendExecutionProvider_CUDA(cudaOption);
     }
     else {
         if (useGPU) {
-            std::cout << "Warning: GPU requested but CUDAExecutionProvider is not available. Falling back to CPU." << std::endl;
+            LOG_WARNING("[YOLO11Classifier] GPU requested but CUDAExecutionProvider is not available. Falling back to CPU.");
         }
-        DEBUG_PRINT("Using CPU for inference.");
+        LOG_DEBUG("[YOLO11Classifier] Using CPU for inference.");
     }
 
     session_ = Ort::Session(env_, modelPath.c_str(), sessionOptions_);
@@ -48,7 +53,7 @@ YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labe
 
     if (modelInputTensorShapeVec.size() == 4) {
         isDynamicInputShape_ = (modelInputTensorShapeVec[2] == -1 || modelInputTensorShapeVec[3] == -1);
-        DEBUG_PRINT("Model input tensor shape from metadata: "
+        LOG_DEBUG_STREAM("[YOLO11Classifier] Model input tensor shape from metadata: "
             << modelInputTensorShapeVec[0] << "x" << modelInputTensorShapeVec[1] << "x"
             << modelInputTensorShapeVec[2] << "x" << modelInputTensorShapeVec[3]);
 
@@ -56,22 +61,24 @@ YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labe
             int modelH = static_cast<int>(modelInputTensorShapeVec[2]);
             int modelW = static_cast<int>(modelInputTensorShapeVec[3]);
             if (modelH != inputImageShape_.height || modelW != inputImageShape_.width) {
-                std::cout << "Warning: Target preprocessing shape (" << inputImageShape_.height << "x" << inputImageShape_.width
+                LOG_WARNING_STREAM("[YOLO11Classifier] Target preprocessing shape (" << inputImageShape_.height << "x" << inputImageShape_.width
                     << ") differs from model's fixed input shape (" << modelH << "x" << modelW << "). "
                     << "Image will be preprocessed to " << inputImageShape_.height << "x" << inputImageShape_.width << "."
-                    << " Consider aligning these for optimal performance/accuracy." << std::endl;
+                    << " Consider aligning these for optimal performance/accuracy.");
             }
         }
         else {
-            DEBUG_PRINT("Model has dynamic input H/W. Preprocessing to specified target: "
+            LOG_DEBUG_STREAM("[YOLO11Classifier] Model has dynamic input H/W. Preprocessing to specified target: "
                 << inputImageShape_.height << "x" << inputImageShape_.width);
         }
     }
     else {
-        std::cerr << "Warning: Model input tensor does not have 4 dimensions as expected (NCHW). Shape: [";
-        for (size_t i = 0; i < modelInputTensorShapeVec.size(); ++i) std::cerr << modelInputTensorShapeVec[i] << (i == modelInputTensorShapeVec.size() - 1 ? "" : ", ");
-        std::cerr << "]. Assuming dynamic shape and proceeding with target HxW: "
-            << inputImageShape_.height << "x" << inputImageShape_.width << std::endl;
+        std::ostringstream oss;
+        oss << "[YOLO11Classifier] Warning: Model input tensor does not have 4 dimensions as expected (NCHW). Shape: [";
+        for (size_t i = 0; i < modelInputTensorShapeVec.size(); ++i) oss << modelInputTensorShapeVec[i] << (i == modelInputTensorShapeVec.size() - 1 ? "" : ", ");
+        oss << "]. Assuming dynamic shape and proceeding with target HxW: "
+            << inputImageShape_.height << "x" << inputImageShape_.width;
+        LOG_WARNING(oss.str());
         isDynamicInputShape_ = true;
     }
 
@@ -109,15 +116,17 @@ YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labe
             }
         }
         oss_shape << "]";
-        DEBUG_PRINT("Model predicts " << numClasses_ << " classes based on output shape: " << oss_shape.str());
+        LOG_DEBUG_STREAM("[YOLO11Classifier] Model predicts " << numClasses_ << " classes based on output shape: " << oss_shape.str());
         // END CORRECTED SECTION
     }
     else {
-        std::cerr << "Warning: Could not reliably determine number of classes from output shape: [";
-        for (size_t i = 0; i < outputTensorShapeVec.size(); ++i) { // Directly print to cerr
-            std::cerr << outputTensorShapeVec[i] << (i == outputTensorShapeVec.size() - 1 ? "" : ", ");
+        std::ostringstream oss;
+        oss << "[YOLO11Classifier] Warning: Could not reliably determine number of classes from output shape: [";
+        for (size_t i = 0; i < outputTensorShapeVec.size(); ++i) {
+            oss << outputTensorShapeVec[i] << (i == outputTensorShapeVec.size() - 1 ? "" : ", ");
         }
-        std::cerr << "]. Postprocessing might be incorrect or assume a default." << std::endl;
+        oss << "]. Postprocessing might be incorrect or assume a default.";
+        LOG_WARNING(oss.str());
     }
 
     classNames_ = utils::getClassNames(labelsPath);
@@ -127,10 +136,22 @@ YOLO11Classifier::YOLO11Classifier(const JString& modelPath, const JString& labe
             << " (" << classNames_.size() << ")." << std::endl;
     }
     if (classNames_.empty() && numClasses_ > 0) {
-        std::cout << "Warning: Class names file is empty or failed to load. Predictions will use numeric IDs if labels are not available." << std::endl;
+        LOG_WARNING("[YOLO11Classifier] Class names file is empty or failed to load. Predictions will use numeric IDs if labels are not available.");
     }
 
-    std::wcout << "YOLO11Classifier initialized successfully. Model: " << modelPath << std::endl;
+    // Note: modelPath is JString (wide string), convert for logging
+    std::string modelPathStr;
+#ifdef UNICODE
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, modelPath.c_str(), -1, NULL, 0, NULL, NULL);
+    if (size_needed > 0) {
+        std::vector<char> buffer(size_needed);
+        WideCharToMultiByte(CP_UTF8, 0, modelPath.c_str(), -1, buffer.data(), size_needed, NULL, NULL);
+        modelPathStr = std::string(buffer.data());
+    }
+#else
+    modelPathStr = std::string(modelPath.c_str());
+#endif
+    LOG_INFO_STREAM("[YOLO11Classifier] YOLO11Classifier initialized successfully. Model: " << modelPathStr);
 }
 
 // ... (preprocess, postprocess, and classify methods remain the same as previous correct version) ...
@@ -159,9 +180,9 @@ void YOLO11Classifier::preprocess(const cv::Mat& image, float*& blob, std::vecto
     inputTensorShape = { 1, 3, static_cast<int64_t>(floatRgbImage.rows), static_cast<int64_t>(floatRgbImage.cols) };
 
     if (static_cast<int>(inputTensorShape[2]) != inputImageShape_.height || static_cast<int>(inputTensorShape[3]) != inputImageShape_.width) {
-        std::cerr << "CRITICAL WARNING: Preprocessed image dimensions (" << inputTensorShape[2] << "x" << inputTensorShape[3]
+        LOG_ERROR_STREAM("[YOLO11Classifier] CRITICAL WARNING: Preprocessed image dimensions (" << inputTensorShape[2] << "x" << inputTensorShape[3]
             << ") do not match target inputImageShape_ (" << inputImageShape_.height << "x" << inputImageShape_.width
-            << ") after resizing! This indicates an issue in utils::preprocessImageToTensor or logic." << std::endl;
+            << ") after resizing! This indicates an issue in utils::preprocessImageToTensor or logic.");
     }
 
     size_t tensorSize = utils::vectorProduct(inputTensorShape); // 1 * C * H * W
@@ -197,7 +218,7 @@ void YOLO11Classifier::preprocess(const cv::Mat& image, float*& blob, std::vecto
         }
     }
 
-    DEBUG_PRINT("Preprocessing completed (RGB, scaled [0,1]). Actual input tensor shape: "
+    LOG_DEBUG_STREAM("[YOLO11Classifier] Preprocessing completed (RGB, scaled [0,1]). Actual input tensor shape: "
         << inputTensorShape[0] << "x" << inputTensorShape[1] << "x"
         << inputTensorShape[2] << "x" << inputTensorShape[3]);
 }
@@ -205,13 +226,13 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
     ScopedTimer timer("Postprocessing");
 
     if (outputTensors.empty()) {
-        std::cerr << "Error: No output tensors for postprocessing." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] No output tensors for postprocessing.");
         return {};
     }
 
     const float* rawOutput = outputTensors[0].GetTensorData<float>();
     if (!rawOutput) {
-        std::cerr << "Error: rawOutput pointer is null." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] rawOutput pointer is null.");
         return {};
     }
 
@@ -225,12 +246,12 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
         oss_shape << outputShape[i] << (i == outputShape.size() - 1 ? "" : ", ");
     }
     oss_shape << "]";
-    DEBUG_PRINT(oss_shape.str());
+    LOG_DEBUG_STREAM("[YOLO11Classifier] " << oss_shape.str());
 
     // Determine the effective number of classes
     int currentNumClasses = numClasses_ > 0 ? numClasses_ : static_cast<int>(classNames_.size());
     if (currentNumClasses <= 0) {
-        std::cerr << "Error: No valid number of classes determined." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] No valid number of classes determined.");
         return {};
     }
 
@@ -240,7 +261,7 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
     for (size_t i = 0; i < std::min(size_t(5), numScores); ++i) {
         oss_scores << rawOutput[i] << " ";
     }
-    DEBUG_PRINT(oss_scores.str());
+    LOG_DEBUG_STREAM("[YOLO11Classifier] " << oss_scores.str());
 
     // Find maximum score and its corresponding class
     int bestClassId = -1;
@@ -270,7 +291,7 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
     }
 
     if (bestClassId == -1) {
-        std::cerr << "Error: Could not determine best class ID." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] Could not determine best class ID.");
         return {};
     }
 
@@ -300,7 +321,7 @@ ClassificationResult YOLO11Classifier::postprocess(const std::vector<Ort::Value>
 #endif
     }
 
-    DEBUG_PRINT("Best class ID: " << bestClassId << ", Name: " << className << ", Confidence: " << confidence);
+    LOG_DEBUG_STREAM("[YOLO11Classifier] Best class ID: " << bestClassId << ", Name: " << className.c_str() << ", Confidence: " << confidence);
     return ClassificationResult(bestClassId, confidence, className);
 }
 
@@ -308,7 +329,7 @@ ClassificationResult YOLO11Classifier::classify(const cv::Mat& image) {
     ScopedTimer timer("Overall classification task");
 
     if (image.empty()) {
-        std::cerr << "Error: Input image for classification is empty." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] Input image for classification is empty.");
         return {};
     }
 
@@ -319,19 +340,19 @@ ClassificationResult YOLO11Classifier::classify(const cv::Mat& image) {
         preprocess(image, blobPtr, currentInputTensorShape);
     }
     catch (const std::exception& e) {
-        std::cerr << "Exception during preprocessing: " << e.what() << std::endl;
+        LOG_ERROR_STREAM("[YOLO11Classifier] Exception during preprocessing: " << e.what());
         if (blobPtr) delete[] blobPtr;
         return {};
     }
 
     if (!blobPtr) {
-        std::cerr << "Error: Preprocessing failed to produce a valid data blob." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] Preprocessing failed to produce a valid data blob.");
         return {};
     }
 
     size_t inputTensorSize = utils::vectorProduct(currentInputTensorShape);
     if (inputTensorSize == 0) {
-        std::cerr << "Error: Input tensor size is zero after preprocessing." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] Input tensor size is zero after preprocessing.");
         delete[] blobPtr;
         return {};
     }
@@ -360,12 +381,12 @@ ClassificationResult YOLO11Classifier::classify(const cv::Mat& image) {
         );
     }
     catch (const Ort::Exception& e) {
-        std::cerr << "ONNX Runtime Exception during Run(): " << e.what() << std::endl;
+        LOG_ERROR_STREAM("[YOLO11Classifier] ONNX Runtime Exception during Run(): " << e.what());
         return {};
     }
 
     if (outputTensors.empty()) {
-        std::cerr << "Error: ONNX Runtime Run() produced no output tensors." << std::endl;
+        LOG_ERROR("[YOLO11Classifier] ONNX Runtime Run() produced no output tensors.");
         return {};
     }
 
@@ -373,7 +394,7 @@ ClassificationResult YOLO11Classifier::classify(const cv::Mat& image) {
         return postprocess(outputTensors);
     }
     catch (const std::exception& e) {
-        std::cerr << "Exception during postprocessing: " << e.what() << std::endl;
+        LOG_ERROR_STREAM("[YOLO11Classifier] Exception during postprocessing: " << e.what());
         return {};
     }
 }
